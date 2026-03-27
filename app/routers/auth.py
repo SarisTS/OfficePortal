@@ -1,0 +1,376 @@
+import random
+from fastapi import APIRouter, Request, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.core.logger import get_logger
+
+from app.core.oauth import oauth
+from app.core.security import create_access_token
+from app.database.database import get_db
+from app.schemas.auth import *
+from app.models.employee import Employee, UserTypes
+from app.utils.hash import hash_password, verify_password
+from app.crud.auth import get_current_user
+from app.core.redis import redis_client
+from app.utils.api_response import ApiResponse
+
+logger = get_logger()
+
+router = APIRouter(tags=["Auth"])
+
+
+# ===================================================================================
+#                            ADMIN AUTHENTICATION
+# ===================================================================================
+# Register
+@router.post("/employees", response_model=ApiResponse)
+def create_employee(
+    request: CreateEmployeeSchema,
+    current_user: Employee = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # 🔐 Permission check
+    if current_user.user_type == UserTypes.super_admin:
+        allowed = [UserTypes.office_admin, UserTypes.staff, UserTypes.employee]
+
+    elif current_user.user_type == UserTypes.office_admin:
+        allowed = [UserTypes.staff, UserTypes.employee]
+
+    else:
+        raise HTTPException(403, "Not allowed")
+
+    if request.user_type not in allowed:
+        raise HTTPException(403, "Cannot create this user type")
+
+    # 🔐 Validation based on user_type
+    if request.user_type in [UserTypes.super_admin, UserTypes.office_admin]:
+        if not request.email or not request.password:
+            raise HTTPException(400, "Email & password required")
+
+    if request.user_type in [UserTypes.staff, UserTypes.employee]:
+        if not request.mobile:
+            raise HTTPException(400, "Mobile required")
+        if not request.company_id:
+            raise HTTPException(400, "Company required")
+
+    # 🔒 Unique checks
+    if request.email:
+        if db.query(Employee).filter(Employee.email == request.email).first():
+            raise HTTPException(400, "Email already exists")
+
+    if request.mobile:
+        if db.query(Employee).filter(Employee.mobile == request.mobile).first():
+            raise HTTPException(400, "Mobile already exists")
+
+    if request.roll_no:
+        if db.query(Employee).filter(Employee.roll_no == request.roll_no).first():
+            raise HTTPException(400, "Roll no already exists")
+
+    # 🏗 Create employee
+    employee = Employee(
+        name=request.name,
+        user_type=request.user_type,
+        email=request.email.lower().strip() if request.email else None,
+        password_hash=hash_password(request.password) if request.password else None,
+        mobile=request.mobile.strip() if request.mobile else None,
+        roll_no=request.roll_no,
+        company_id=request.company_id,
+        department_id=request.department_id,
+        role_id=request.role_id,
+        is_verified=True  # optional
+    )
+
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Employee Created Successfully",
+        "data":{
+            "id": employee.id,
+            "name": employee.name,
+            "roll_no": employee.roll_no
+        }
+    }
+
+# Admin Login
+@router.post("/admin/login", response_model=ApiResponse)
+def admin_login(request: LoginRequest, db: Session = Depends(get_db)):
+    employee = db.query(Employee).filter(
+        Employee.email == request.email,
+        Employee.deleted_at.is_(None)
+    ).first()
+
+    if not employee or not employee.password_hash:
+        raise HTTPException(400, "Invalid credentials")
+
+    if employee.user_type not in [UserTypes.super_admin, UserTypes.office_admin]:
+        raise HTTPException(403, "Access denied")
+
+    if not verify_password(request.password, employee.password_hash):
+        raise HTTPException(400, "Invalid credentials")
+
+    token = create_access_token({
+        "sub": str(employee.id),
+        "user_type": employee.user_type.value,
+    })
+
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Admin Login Successfully",
+        "data": {
+            "token_type": "bearer",
+            "access_token": token
+        }
+    }
+
+# Google Login
+@router.get("/google/login")
+async def google_login(request: Request):
+    try:
+        redirect_uri = request.url_for("google_callback")
+        print(redirect_uri)
+
+        return await oauth.google.authorize_redirect(
+            request,
+            redirect_uri
+        )
+
+    except Exception:
+        logger.exception("Error initiating Google login")
+        raise HTTPException(status_code=500, detail="OAuth error")
+    
+
+# Google Callback
+@router.get("/google/callback", response_model=ApiResponse)
+async def google_callback(request: Request, db: Session = Depends(get_db)):
+    try:
+        token = await oauth.google.authorize_access_token(request)
+
+        user_info = token.get("userinfo")
+        if not user_info:
+            user_info = await oauth.google.parse_id_token(request, token)
+
+        if not user_info:
+            raise HTTPException(status_code=400, detail="Failed to fetch user info")
+
+        email = user_info.get("email")
+        google_id = user_info.get("sub")
+        email_verified = user_info.get("email_verified")
+
+        if not email or not email_verified:
+            raise HTTPException(status_code=400, detail="Invalid or unverified email")
+
+        email = email.lower().strip()
+
+        employee = db.query(Employee).filter(
+            (Employee.email == email) | (Employee.google_id == google_id),
+            Employee.deleted_at.is_(None)
+        ).first()
+
+        if not employee:
+            raise HTTPException(400, "User not found")
+
+        if employee.user_type not in [UserTypes.super_admin, UserTypes.office_admin]:
+            raise HTTPException(403, "Access denied")
+
+        # Link Google
+        if not employee.google_id:
+            employee.google_id = google_id
+            db.commit()
+
+        jwt_token = create_access_token({
+            "sub": str(employee.id),
+            "email": employee.email,
+            "user_type": employee.user_type.value
+        })
+
+        return {
+            "status": status.HTTP_200_OK,
+            "message": "Admin Login via Google OAuth Successfully",
+            "data": {
+                "token_type": "bearer",
+                "access_token": jwt_token
+            }
+        }
+
+    except Exception as e:
+        logger.exception(f"Google login failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Google authentication failed")
+    
+
+# Admin Change Password
+@router.post("/change-password", response_model=ApiResponse)
+def change_password(
+    request: ChangePasswordSchema,
+    current_user: Employee = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    
+    if not current_user.password_hash:
+        raise HTTPException(400, "Password not set")
+    
+    if not verify_password(request.old_password, current_user.password_hash):
+        raise HTTPException(400, "Invalid old password")
+
+    current_user.password_hash = hash_password(request.new_password)
+    db.commit()
+
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Password Updated Successfully",
+        "data": {}
+    }
+
+
+    
+# ===================================================================================
+#                            USER AUTHENTICATION
+# ===================================================================================
+
+
+# Employee Login
+@router.post("/employee/login", response_model=ApiResponse)
+def employee_login(request: EmployeeLoginSchema, db: Session = Depends(get_db)):
+    employee = db.query(Employee).filter(
+        Employee.roll_no == request.roll_no,
+        Employee.deleted_at.is_(None)
+    ).first()
+
+    if not employee or not employee.password_hash:
+        raise HTTPException(400, "Invalid credentials")
+
+    if employee.user_type not in [UserTypes.staff, UserTypes.employee]:
+        raise HTTPException(403, "Access denied")
+
+    if not verify_password(request.password, employee.password_hash):
+        raise HTTPException(400, "Invalid credentials")
+
+    token = create_access_token({
+        "sub": str(employee.id),
+        "user_type": employee.user_type.value,
+    })
+
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Employee Login Successfully",
+        "data": {
+            "token_type": "bearer",
+            "access_token": token
+        }
+    }
+
+
+# Employee Send OTP
+@router.post("/send-otp", response_model=ApiResponse)
+def send_otp(request: OTPRequestSchema, db: Session = Depends(get_db)):
+    employee = db.query(Employee).filter(
+        Employee.mobile == request.mobile,
+        Employee.deleted_at.is_(None)
+    ).first()
+
+    if not employee:
+        raise HTTPException(400, "Invalid mobile")
+
+    otp = str(random.randint(100000, 999999))
+
+    redis_client.setex(f"otp:{request.mobile}", 300, otp)
+
+    # TODO: send SMS
+    print(f"OTP: {otp}")
+
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "OTP Sent Successfully",
+        "data": {}
+    }
+
+
+# Employee Verify OTP
+@router.post("/verify-otp", response_model=ApiResponse)
+def verify_otp(request: OTPVerifySchema, db: Session = Depends(get_db)):
+    stored_otp = redis_client.get(f"otp:{request.mobile}")
+
+    if not stored_otp or stored_otp.decode() != request.otp:
+        raise HTTPException(400, "Invalid OTP")
+
+    employee = db.query(Employee).filter(
+        Employee.mobile == request.mobile,
+        Employee.deleted_at.is_(None)
+    ).first()
+
+    if not employee:
+        raise HTTPException(400, "User not found")
+
+    token = create_access_token({
+        "sub": str(employee.id),
+        "user_type": employee.user_type.value,
+        "company_id": employee.company_id
+    })
+
+    redis_client.delete(f"otp:{request.mobile}")
+
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "OTP Verified Successfully",
+        "data": {
+            "token_type": "bearer",
+            "access_token": token
+        }
+    }
+
+
+# Employee Forgot Password
+@router.post("/employee/forgot-password", response_model=ApiResponse)
+def forgot_password(data: OTPRequestSchema, db: Session = Depends(get_db)):
+    employee = db.query(Employee).filter(
+        Employee.mobile == data.mobile,
+        Employee.deleted_at.is_(None)
+    ).first()
+
+    if not employee:
+        raise HTTPException(404, "User not found")
+
+    otp = str(random.randint(100000, 999999))
+
+    redis_client.setex(f"reset_otp:{data.mobile}", 300, otp)
+
+    print(f"Reset OTP: {otp}")
+
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "OTP Sent for Password reset",
+        "data": {}
+    }
+
+
+# Employee Reset Password
+@router.post("/employee/reset-password", response_model=ApiResponse)
+def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
+    stored_otp = redis_client.get(f"reset_otp:{data.mobile}")
+
+    if not stored_otp or stored_otp.decode() != data.otp:
+        raise HTTPException(400, "Invalid or expired OTP")
+
+    employee = db.query(Employee).filter(
+        Employee.mobile == data.mobile,
+        Employee.deleted_at.is_(None)
+    ).first()
+
+    if not employee:
+        raise HTTPException(404, "User not found")
+
+    employee.password_hash = hash_password(data.new_password)
+    db.commit()
+
+    redis_client.delete(f"reset_otp:{data.mobile}")
+
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Password reset Successfully",
+        "data": {}
+    }
+
+@router.get("/me")
+def get_me(current_user: Employee = Depends(get_current_user)):
+    return current_user
