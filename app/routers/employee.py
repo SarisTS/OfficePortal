@@ -39,6 +39,21 @@ def get_all_employees(
     } 
 
 
+@router.get("/role/{role_id}", response_model=ApiResponse[PaginatedResponse[EmployeeResponse]])
+def get_employees_by_role(
+    role_id: int,
+    skip: int = 0,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    user = Depends(require_admin)
+):
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Users Listed Successfully",
+        "data": employee_crud.get_employees_by_role(db, user, role_id, skip, limit)
+    } 
+
+
 @router.get("/{employee_id}", response_model=ApiResponse[EmployeeResponse])
 def get_employee(
     employee_id: int,

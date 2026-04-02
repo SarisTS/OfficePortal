@@ -7,6 +7,7 @@ from app.schemas.food import *
 from app.crud.food import *
 from app.database.database import get_db
 from app.crud.auth import require_admin
+from typing import List
 
 router = APIRouter(tags=["Admin Food"])
 
@@ -18,6 +19,13 @@ def create_item(
     user=Depends(require_admin)
 ):
     return create_food_item(db, data)
+
+@router.get("/items", response_model=List[FoodItemOut], status_code=200)
+def get_items(
+    db: Session = Depends(get_db),
+    user=Depends(require_admin)
+):
+    return get_food_items(db, user)
 
 
 @router.post("/menu", response_model=DailyMenuOut, status_code=201)
