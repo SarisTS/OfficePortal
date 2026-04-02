@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy import or_, text
+from app.crud.auth import is_global_admin
 from app.models.food import FoodItem, DailyMenu, DailyMenuItem, FoodSelection
 
 
@@ -35,6 +36,11 @@ def create_daily_menu(db: Session, data):
     db.commit()
     return menu
 
+def get_food_items(db: Session, user):
+    if not is_global_admin(user):
+        raise HTTPException(403, "Not authorized")
+
+    return db.query(FoodItem).all()
 
 def get_menu_by_date(db: Session, date, company_id=None):
     return db.query(DailyMenu).filter(

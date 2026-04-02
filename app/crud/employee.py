@@ -263,6 +263,54 @@ def get_all_employees(db: Session, user, skip=0, limit=10):
     }
 
 
+def get_employees_by_role(db: Session, user, role_id, skip=0, limit=10):
+    query = (
+        db.query(Employee)
+        .options(joinedload(Employee.role), joinedload(Employee.department))
+        .filter(Employee.role_id == role_id, Employee.deleted_at == None)
+        )
+
+    if not is_global_admin(user):
+        query = query.filter(Employee.company_id == user.company_id)
+
+    total = query.count()
+
+    employees = query.order_by(Employee.id.desc()).offset(skip).limit(limit).all()
+
+    items = []
+    for emp in employees:
+        items.append({
+            "id": emp.id,
+            "roll_no": emp.roll_no,
+            "name": emp.name,
+            "email": emp.email,
+            "role_id": emp.role_id,
+            "role_name": emp.role.role_name if emp.role else None,
+            "user_type": emp.user_type,
+            "company_id": emp.company_id,
+            "department_id": emp.department_id,
+            "department_name": emp.department.dept_name if emp.department else None,
+            "hostel_id": emp.hostel_id,
+            "mobile": emp.mobile,
+            "address_line_1": emp.address_line_1,
+            "address_line_2": emp.address_line_2,
+            "landmark": emp.landmark,
+            "city": emp.city,
+            "state": emp.state,
+            "pincode": emp.pincode,
+            "is_active": emp.is_active,
+            "created_at": emp.created_at,
+            "updated_at": emp.updated_at,
+        })
+
+    return {
+        "skip": skip,
+        "limit": limit,
+        "total": total,
+        "items": items
+    }
+
+
 def update_employee(db: Session, employee_id: int, employee: EmployeeUpdate, user):
     try:
         db_employee = db.query(Employee).filter(

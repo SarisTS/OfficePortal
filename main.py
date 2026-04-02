@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.logger import get_logger
@@ -57,11 +58,37 @@ async def log_requests(request: Request, call_next):
         logger.exception("Unhandled error")
         raise
 
+# Error Response
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "status": "error",
+            "code": exc.status_code,
+            "message": exc.detail,
+        },
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "error",
+            "code": 500,
+            "message": "Internal Server Error",
+        },
+    )
 
 # Root
 @app.get("/")
 def root():
-    return {"message": "API is running"}
+    return {
+        "status": "success",
+        "message": "API is running",
+        "data": None
+    }
 
 
 # Routers

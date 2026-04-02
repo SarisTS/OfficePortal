@@ -18,7 +18,7 @@ def create(payload: LocationCreate, db: Session = Depends(get_db)):
         "data"   : location
     }
 
-@router.get("/list", response_model = ApiResponse[PaginatedResponse[LocationOut]])
+@router.get("/", response_model = ApiResponse[PaginatedResponse[LocationOut]])
 def get_locations(db: Session = Depends(get_db), page: int = Query(1, ge=1), limit: int = Query(10, le=50),):
     total, locations = crud.get_locations(db, page=page, limit=limit)
     if not locations:
@@ -27,14 +27,14 @@ def get_locations(db: Session = Depends(get_db), page: int = Query(1, ge=1), lim
         "status" : status.HTTP_200_OK,
         "message": "Locations fetched successfully",
         "data": {
-            "page": page,
+            "skip": page,
             "limit": limit,
             "total": total,
             "items": [crud.map_location_out(loc) for loc in locations]
         }
     }
 
-@router.get("/get/{location_id}", response_model = ApiResponse[LocationOut])
+@router.get("/{location_id}", response_model = ApiResponse[LocationOut])
 def get_location_by_id(location_id: int, db: Session = Depends(get_db)):
     location = crud.get_location_by_id(db, location_id)
     if not location:
