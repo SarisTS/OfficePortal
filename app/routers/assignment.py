@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
+from app.core.permissions import assert_self_or_admin
 from app.database.database import get_db
 from app.schemas.assignment import (ShiftAssignmentCreate, ShiftAssignmentResponse, ShiftChangeRequest)
 from app.crud import assignment as shift_crud
@@ -52,7 +53,9 @@ def get_employee_shifts(
     db: Session = Depends(get_db),
     user = Depends(require_admin)
 ):
-    result = shift_crud.get_employee_shift_history(db, employee_id)
+    # Pass the actor; CRUD enforces same-company for office_admin and global
+    # access for super_admin.
+    result = shift_crud.get_employee_shift_history(db, employee_id, user)
 
     return {
         "status": status.HTTP_200_OK,
@@ -67,7 +70,10 @@ def get_current_shift(
     db: Session = Depends(get_db),
     user = Depends(require_user)
 ):
-    result = shift_crud.get_current_shift(db, employee_id)
+    # Router-level gate: self or any admin. CRUD then enforces same-company
+    # for office_admin.
+    assert_self_or_admin(user, employee_id)
+    result = shift_crud.get_current_shift(db, employee_id, user)
 
     return {
         "status": status.HTTP_200_OK,
