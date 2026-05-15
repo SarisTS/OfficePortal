@@ -1,8 +1,10 @@
+import hmac
 import random
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.logger import get_logger
 
+from app.core.config import settings
 from app.core.oauth import oauth
 from app.core.security import create_access_token
 from app.database.database import get_db
@@ -129,7 +131,7 @@ def admin_login(request: LoginRequest, db: Session = Depends(get_db)):
 async def google_login(request: Request):
     try:
         redirect_uri = request.url_for("google_callback")
-        print(redirect_uri)
+        logger.debug(f"Google OAuth redirect_uri={redirect_uri}")
 
         return await oauth.google.authorize_redirect(
             request,
@@ -276,8 +278,9 @@ def send_otp(request: OTPRequestSchema, db: Session = Depends(get_db)):
 
     redis_client.setex(f"otp:{request.mobile}", 300, otp)
 
-    # TODO: send SMS
-    print(f"OTP: {otp}")
+    # TODO: send SMS. In dev only, surface OTP in logs (never in prod).
+    if settings.DEBUG:
+        logger.debug(f"[dev] OTP for {request.mobile}: {otp}")
 
     return {
         "status": status.HTTP_200_OK,
@@ -291,7 +294,9 @@ def send_otp(request: OTPRequestSchema, db: Session = Depends(get_db)):
 def verify_otp(request: OTPVerifySchema, db: Session = Depends(get_db)):
     stored_otp = redis_client.get(f"otp:{request.mobile}")
 
-    if not stored_otp or stored_otp.decode() != request.otp:
+    # redis_client is created with decode_responses=True, so stored_otp is str | None.
+    # Constant-time compare to avoid trivial OTP timing oracles.
+    if not stored_otp or not hmac.compare_digest(stored_otp, request.otp):
         raise HTTPException(400, "Invalid OTP")
 
     employee = db.query(Employee).filter(
@@ -335,7 +340,8 @@ def forgot_password(data: OTPRequestSchema, db: Session = Depends(get_db)):
 
     redis_client.setex(f"reset_otp:{data.mobile}", 300, otp)
 
-    print(f"Reset OTP: {otp}")
+    if settings.DEBUG:
+        logger.debug(f"[dev] Reset OTP for {data.mobile}: {otp}")
 
     return {
         "status": status.HTTP_200_OK,
@@ -349,7 +355,8 @@ def forgot_password(data: OTPRequestSchema, db: Session = Depends(get_db)):
 def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
     stored_otp = redis_client.get(f"reset_otp:{data.mobile}")
 
-    if not stored_otp or stored_otp.decode() != data.otp:
+    # decode_responses=True → stored_otp is str | None. Constant-time compare.
+    if not stored_otp or not hmac.compare_digest(stored_otp, data.otp):
         raise HTTPException(400, "Invalid or expired OTP")
 
     employee = db.query(Employee).filter(
