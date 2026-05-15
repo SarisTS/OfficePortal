@@ -1,5 +1,7 @@
 # Office Portal — Backend
 
+[![CI](https://github.com/SarisTS/OfficePortal/actions/workflows/ci.yml/badge.svg)](https://github.com/SarisTS/OfficePortal/actions/workflows/ci.yml)
+
 A multi-tenant HRMS backend: attendance with geo-fencing, shift assignments,
 leave management, hostels, daily food selection, and per-company RBAC.
 Built on FastAPI + PostgreSQL + SQLAlchemy.
