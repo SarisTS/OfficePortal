@@ -52,7 +52,7 @@ def get_shift(
     }
 
 @router.get("/company/{company_id}", response_model=ApiResponse[list[ShiftResponse]])
-def get_shift(
+def get_shifts_by_company(
     company_id: int,
     db: Session = Depends(get_db),
     user = Depends(require_admin)
