@@ -1,3 +1,6 @@
+import time
+import uuid
+
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -64,18 +67,32 @@ app.add_middleware(
 )
 
 
-# Logging
+# Request-id + access log. Mints a UUID per request (or trusts an inbound
+# X-Request-ID if the caller sent one — useful for client/server log
+# correlation in CI or when an upstream proxy already set it). Stashes it on
+# request.state and binds it to loguru's context so every log statement
+# emitted inside the request includes it.
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
-    logger.info(f"{request.method} {request.url}")
+async def request_id_middleware(request: Request, call_next):
+    incoming = request.headers.get("X-Request-ID")
+    request_id = incoming if incoming else uuid.uuid4().hex
+    request.state.request_id = request_id
 
-    try:
-        response = await call_next(request)
-        logger.info(f"Status: {response.status_code}")
+    start = time.perf_counter()
+    with logger.contextualize(request_id=request_id):
+        logger.info(f"--> {request.method} {request.url.path}")
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception("Unhandled error")
+            raise
+        elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+        logger.info(
+            f"<-- {request.method} {request.url.path} "
+            f"{response.status_code} ({elapsed_ms}ms)"
+        )
+        response.headers["X-Request-ID"] = request_id
         return response
-    except Exception:
-        logger.exception("Unhandled error")
-        raise
 
 # Error Response
 @app.exception_handler(HTTPException)
