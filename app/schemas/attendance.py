@@ -62,9 +62,8 @@ class AttendanceResponse(BaseModel):
 
     attendance_status: AttendanceStatus
 
-    is_manual: Optional[bool] = False   
-    manual_reason: Optional[str] = None 
-    marked_by: Optional[int] = None     
+    is_manual: Optional[bool] = False
+    manual_reason: Optional[str] = None
 
     class Config:
         from_attributes = True
