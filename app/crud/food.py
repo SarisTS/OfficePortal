@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy import or_, text
-from app.crud.auth import is_global_admin
+
 from app.models.food import FoodItem, DailyMenu, DailyMenuItem, FoodSelection
 
 
@@ -37,9 +37,11 @@ def create_daily_menu(db: Session, data):
     return menu
 
 def get_food_items(db: Session, user, skip: int = 0, limit: int = 10):
-    if not is_global_admin(user):
-        raise HTTPException(403, "Not authorized")
-
+    # Listing the food catalog is now open to any admin (router already
+    # enforces require_admin). office_admin needs the catalog to build
+    # daily menus from it. Item creation/edit/delete remain super_admin
+    # only — those endpoints don't exist yet, but if they get added they
+    # should gate on is_super_admin explicitly.
     base = db.query(FoodItem)
     total = base.count()
     items = base.order_by(FoodItem.id).offset(skip).limit(limit).all()
