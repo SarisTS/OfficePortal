@@ -54,4 +54,7 @@ class Leave(Base, AuditMixin):
 
     __table_args__ = (
         Index("idx_leave_employee_dates", "employee_id", "start_date", "end_date"),
+        # Admin dashboards list "pending" leaves all the time; the status
+        # column is low-cardinality but frequently filtered.
+        Index("idx_leave_status", "status"),
     )
