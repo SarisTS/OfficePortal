@@ -4,12 +4,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 import pytz
 
+from app.core.config import settings
 from app.models.assignment import EmployeeShiftAssignment, CompanyLocation
 from app.models.attendance import Attendance, AttendanceStatus
 from app.utils.distance import calculate_distance
 
 
-IST = pytz.timezone("Asia/Kolkata")
+# Resolved once at import. Settings is itself env-driven, defaulting to
+# "Asia/Kolkata" so existing deployments are unaffected. Invalid zone
+# names raise pytz.UnknownTimeZoneError here — that's intentional:
+# fail-fast at startup beats silently mislocalizing every check-in.
+LOCAL_TZ = pytz.timezone(settings.TIMEZONE)
 
 
 class AttendanceService:
@@ -20,7 +25,7 @@ class AttendanceService:
 
     @staticmethod
     def now():
-        return datetime.now(IST)
+        return datetime.now(LOCAL_TZ)
 
     @staticmethod
     def get_active_shift(db, employee_id, now):
@@ -44,14 +49,14 @@ class AttendanceService:
     @staticmethod
     def _get_shift_window(now, shift):
         """
-        Returns shift_start and shift_end in IST timezone
-        Handles night shifts correctly
+        Returns shift_start and shift_end in the configured LOCAL_TZ.
+        Handles night shifts correctly.
         """
 
         base_date = now.date()
 
-        shift_start = IST.localize(datetime.combine(base_date, shift.start_time))
-        shift_end = IST.localize(datetime.combine(base_date, shift.end_time))
+        shift_start = LOCAL_TZ.localize(datetime.combine(base_date, shift.start_time))
+        shift_end = LOCAL_TZ.localize(datetime.combine(base_date, shift.end_time))
 
         # 🌙 Night shift (cross midnight)
         if shift.end_time <= shift.start_time:
@@ -192,8 +197,8 @@ class AttendanceService:
         shift = attendance.shift
 
         # 🔹 Get correct shift window using attendance.date
-        shift_start = IST.localize(datetime.combine(attendance.date, shift.start_time))
-        shift_end = IST.localize(datetime.combine(attendance.date, shift.end_time))
+        shift_start = LOCAL_TZ.localize(datetime.combine(attendance.date, shift.start_time))
+        shift_end = LOCAL_TZ.localize(datetime.combine(attendance.date, shift.end_time))
 
         if shift.end_time <= shift.start_time:
             shift_end += timedelta(days=1)

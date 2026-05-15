@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "text"  # "text" | "json"
 
+    # Service-wide timezone used by attendance shift-window math (check-in
+    # late thresholds, night-shift handling, etc.). Must be a valid IANA /
+    # pytz zone name; invalid values fail fast at startup.
+    TIMEZONE: str = "Asia/Kolkata"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
