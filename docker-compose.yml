@@ -1,0 +1,86 @@
+# Local development stack.
+#
+# Brings up Postgres 18 + Redis 7, runs `alembic upgrade head` once,
+# then starts uvicorn with /health, /docs, and the rest of the API
+# reachable on http://localhost:8000.
+#
+# Usage:
+#
+#   docker compose up --build              # foreground
+#   docker compose up --build -d           # detached
+#   docker compose logs -f app             # tail app logs
+#   docker compose down                    # stop, keep volume
+#   docker compose down -v                 # stop, drop the db volume
+#
+# Compose v2 is assumed (no top-level `version:` key, supports
+# service_completed_successfully / service_healthy depends_on).
+
+services:
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-office_portal}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      # `$$` escapes the variable so docker-compose passes it through
+      # to the shell INSIDE the container instead of trying to expand
+      # it at the compose level.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-office_portal}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # One-shot service: runs alembic upgrade head and exits. The `app`
+  # service depends on this completing successfully so the API never
+  # starts against a stale schema.
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-office_portal}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build: .
+    env_file: .env
+    # Compose overrides win over .env for these — the app must reach
+    # the compose-managed db / redis by their service names, not the
+    # host's localhost.
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-office_portal}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    ports:
+      - "8000:8000"
+    volumes:
+      # location.json is gitignored AND dockerignored, so it's not in
+      # the image. Mount it from the project root on the host so
+      # app/crud/location.py can find it at /app/location.json.
+      - ./location.json:/app/location.json:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db_data:
