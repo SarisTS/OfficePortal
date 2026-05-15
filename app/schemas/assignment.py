@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import date, time
 from typing import Optional
 
@@ -29,8 +29,7 @@ class ShiftResponse(BaseModel):
     grace_minutes: int
     company_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ShiftAssignmentCreate(StrictRequestModel):
@@ -54,5 +53,4 @@ class ShiftAssignmentResponse(BaseModel):
 
     shift_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

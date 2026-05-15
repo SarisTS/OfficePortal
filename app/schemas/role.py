@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 from app.schemas.base import StrictRequestModel
@@ -16,5 +16,4 @@ class RoleResponse(BaseModel):
     id: int
     role_name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

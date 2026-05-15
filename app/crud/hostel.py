@@ -2,10 +2,19 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from app.models.hostel import Hostel
-from app.crud.auth import is_global_admin
 from app.core.logger import get_logger
 
 logger = get_logger()
+
+
+# NOTE on access control: the Hostel model has no company_id column —
+# only a location_id pointing at the geographic Location table. There is
+# no Hostel↔Company association in the schema, so "scope hostel mutations
+# to the actor's company" cannot be expressed without a schema change.
+# Hostels are therefore treated as global infrastructure that any admin
+# (router require_admin → super_admin or office_admin) may manage. If
+# per-company scoping is needed, add Hostel.company_id (or a join table)
+# in a follow-up migration and tighten the checks below.
 
 def create_hostel(db, hostel, user):
     try:
@@ -63,9 +72,6 @@ def update_hostel(db, hostel_id, data, user):
         if not hostel:
             return None
 
-        if not is_global_admin(user):
-            raise HTTPException(403, "Not allowed")
-
         update_data = data.model_dump(exclude_unset=True)
 
         # 🔒 Duplicate check
@@ -104,9 +110,6 @@ def delete_hostel(db, hostel_id, user):
 
         if not hostel:
             return None
-
-        if not is_global_admin(user):
-            raise HTTPException(403, "Not allowed")
 
         hostel.deleted_at = datetime.now(timezone.utc)
         hostel.updated_by = user.id

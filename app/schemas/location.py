@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 
@@ -49,8 +49,7 @@ class LocationOut(BaseModel):
     updated_at  : Optional[datetime]
     deleted_at  : Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # ==============================
 #   COUNTRY SCHEMAS
@@ -78,8 +77,7 @@ class CountryOut(BaseModel):
     updated_at: Optional[datetime]
     deleted_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class JSONCountryResponse(BaseModel):
     id             : int
@@ -90,8 +88,7 @@ class JSONCountryResponse(BaseModel):
     currency_name  : Optional [str] = None
     currency_symbol: Optional [str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # ==============================
 #   STATE SCHEMAS
@@ -119,8 +116,7 @@ class StateOut(BaseModel):
     updated_at: Optional[datetime]
     deleted_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class JSONStateResponse(BaseModel):
     id: int
@@ -130,8 +126,7 @@ class JSONStateResponse(BaseModel):
     longitude : Optional [str] = None
     type: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # ==============================
 #   CITY SCHEMAS
@@ -160,8 +155,7 @@ class CityOut(BaseModel):
     updated_at : Optional[datetime]
     deleted_at : Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class JSONCityResponse(BaseModel):
     id: int
@@ -169,8 +163,7 @@ class JSONCityResponse(BaseModel):
     latitude : Optional [str] = None
     longitude : Optional [str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class UserLocationOut(BaseModel):
     id          : int
@@ -182,8 +175,7 @@ class UserLocationOut(BaseModel):
     city_name   : str
     postal_code : Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # ==============================
 #   COMPANY LOCATION LAT LON
@@ -217,5 +209,4 @@ class CompanyLocationResponse(CompanyLocationBase):
     is_active: bool
     is_primary: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

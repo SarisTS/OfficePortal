@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import date
 from typing import List, Optional, Literal
 
@@ -16,8 +16,7 @@ class FoodItemOut(BaseModel):
     name: str
     category: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---------- Menu ----------
@@ -30,8 +29,7 @@ class DailyMenuCreate(StrictRequestModel):
 class DailyMenuItemOut(BaseModel):
     food: FoodItemOut
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DailyMenuOut(BaseModel):
@@ -39,8 +37,7 @@ class DailyMenuOut(BaseModel):
     date: date
     items: List[DailyMenuItemOut]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---------- Selection ----------
