@@ -1,0 +1,56 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+.github
+
+# Python build artefacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Virtualenvs (never ship a host venv inside the image)
+venv
+env
+.venv
+
+# Tests don't run in prod
+tests
+
+# Secrets and dev-only files
+.env
+.env.example
+.env.*
+secrets.json
+
+# Bulk reference data — must be volume-mounted onto the running
+# container, not baked into the image. See README "Data files".
+location.json
+location.json.backup
+
+# Logs and local DBs
+logs
+*.log
+*.sqlite3
+
+# Editor / OS junk
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Docker meta — already used by the build, no need to COPY into the image
+Dockerfile
+.dockerignore
+
+# Documentation (optional, small — comment out if you want it in the image)
+Readme.md
+
+# Claude Code session files (local-only)
+.claude
+claude.md
