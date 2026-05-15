@@ -9,6 +9,7 @@ from app.core.oauth import oauth
 from app.core.security import create_access_token
 from app.database.database import get_db
 from app.schemas.auth import *
+from app.schemas.employee import EmployeeResponse
 from app.models.employee import Employee, UserTypes
 from app.utils.hash import hash_password, verify_password
 from app.crud.auth import get_current_user
@@ -378,6 +379,13 @@ def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
         "data": {}
     }
 
-@router.get("/me")
+@router.get("/me", response_model=ApiResponse)
 def get_me(current_user: Employee = Depends(get_current_user)):
-    return current_user
+    # Return a Pydantic projection — never the raw ORM object, which would
+    # leak password_hash, google_id, and other sensitive columns.
+    profile = EmployeeResponse.model_validate(current_user)
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "OK",
+        "data": profile.model_dump(),
+    }
