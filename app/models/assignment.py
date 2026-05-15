@@ -81,4 +81,7 @@ class CompanyLocation(Base, AuditMixin):
 
     __table_args__ = (
         Index("idx_company_location", "company_id"),
+        # Prevent two locations with the same name inside one company. This
+        # is the natural key office_admins are looking up by.
+        UniqueConstraint("company_id", "name", name="uq_company_location_name"),
     )
