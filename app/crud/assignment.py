@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from app.models.attendance import Shift
-from app.models.employee import Employee
+from app.models.employee import Employee, UserTypes
 from app.models.assignment import EmployeeShiftAssignment
 from datetime import date
 from app.crud.auth import is_global_admin
@@ -72,8 +72,8 @@ def assign_shift(db: Session, data, user):
     if not employee:
         raise HTTPException(404, "Employee not found")
 
-    # 🔒 Tenant check
-    if employee.company_id != user.company_id:
+    # 🔒 Tenant check — super_admin is unscoped; office_admin must share company
+    if not is_global_admin(user) and employee.company_id != user.company_id:
         raise HTTPException(403, "Not allowed")
 
     # ❌ Overlap check
@@ -96,6 +96,16 @@ def assign_shift(db: Session, data, user):
 
 
 def change_shift(db: Session, employee_id: int, new_shift_id: int, start_date: date, user):
+
+    # 🔒 Validate target employee + tenant check
+    employee = db.query(Employee).filter(
+        Employee.id == employee_id,
+        Employee.deleted_at == None
+    ).first()
+    if not employee:
+        raise HTTPException(404, "Employee not found")
+    if not is_global_admin(user) and employee.company_id != user.company_id:
+        raise HTTPException(403, "Not allowed")
 
     current = db.query(EmployeeShiftAssignment).filter(
         EmployeeShiftAssignment.employee_id == employee_id,
@@ -133,11 +143,12 @@ def get_employee_shift_history(db, employee_id: int, user):
     if not employee:
         raise HTTPException(404, "Employee not found")
 
-    # 🔒 Access control
-    if user.user_type == "employee":
+    # 🔒 Access control: non-admin can only see their own; office_admin must
+    # share company; super_admin is unscoped. (Previously `user.user_type ==
+    # "employee"` compared an enum to a string and silently failed open.)
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if employee_id != user.id:
             raise HTTPException(403, "Not allowed")
-
     elif not is_global_admin(user):
         if employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
@@ -161,11 +172,10 @@ def get_current_shift(db, employee_id: int, user):
     if not employee:
         raise HTTPException(404, "Employee not found")
 
-    # 🔒 Access control
-    if user.user_type == "employee":
+    # 🔒 Access control — same rules as get_employee_shift_history.
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if employee_id != user.id:
             raise HTTPException(403, "Not allowed")
-
     elif not is_global_admin(user):
         if employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
