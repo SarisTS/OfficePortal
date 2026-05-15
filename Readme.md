@@ -81,7 +81,19 @@ alembic upgrade head
 alembic current     # expect: <latest revision> (head)
 ```
 
-### 5. Run
+### 5. Data files
+
+`app/crud/location.py` reads `location.json` from the project root at
+startup — a ~38 MB countries/states/cities dataset used for geographic
+lookups. It's **gitignored** (kept out of history to keep clones light)
+and must be present on disk for the app to start.
+
+Copy the file into the project root from a known source (e.g. your
+existing dev machine, an S3 bucket, or a build artifact) before
+running the server. If the file is missing, location-related endpoints
+will fail at runtime.
+
+### 6. Run
 
 ```bash
 uvicorn main:app --reload
