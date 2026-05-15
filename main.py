@@ -1,10 +1,14 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.logger import get_logger
 from app.core.config import settings
+from app.core.redis import redis_client
+from app.database.database import get_db
 
 from app.routers.auth import router as auth_router
 from app.routers.employee import router as employee_router
@@ -89,6 +93,38 @@ def root():
         "message": "API is running",
         "data": None
     }
+
+
+# Liveness + readiness: DB is required, Redis is best-effort (used for OTPs only).
+@app.get("/health")
+def health(db: Session = Depends(get_db)):
+    db_ok = True
+    db_error = None
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as e:
+        db_ok = False
+        db_error = str(e)
+        logger.exception("Healthcheck: DB ping failed")
+
+    redis_ok = True
+    redis_error = None
+    try:
+        redis_client.ping()
+    except Exception as e:
+        redis_ok = False
+        redis_error = str(e)
+        logger.warning(f"Healthcheck: Redis ping failed: {e}")
+
+    body = {
+        "status": "ok" if db_ok else "degraded",
+        "checks": {
+            "database": {"ok": db_ok, "error": db_error},
+            "redis": {"ok": redis_ok, "error": redis_error},
+        },
+        "environment": settings.APP_ENVIRONMENT,
+    }
+    return JSONResponse(status_code=200 if db_ok else 503, content=body)
 
 
 # Routers
