@@ -55,6 +55,8 @@ class Attendance(Base, AuditMixin):
     __table_args__ = (
         UniqueConstraint("employee_id", "date", name="unique_employee_attendance"),
         Index("idx_employee_date", "employee_id", "date"),
+        # New composite for dashboards filtering by company+date range.
+        Index("idx_attendance_company_date", "company_id", "date"),
     )
 
 class Shift(Base, AuditMixin):
@@ -73,6 +75,15 @@ class Shift(Base, AuditMixin):
     company_id = Column(Integer, ForeignKey("companies.id"))
     company = relationship("Company")
     assignments = relationship("EmployeeShiftAssignment", back_populates="shift")
+
+    __table_args__ = (
+        # Prevent duplicate shift names within a company. Note: company_id is
+        # nullable today (legacy "global" shifts); NULL never collides with
+        # NULL in a Postgres unique index, so global shifts can still have the
+        # same name. Tightening company_id to NOT NULL is deferred.
+        UniqueConstraint("company_id", "name", name="uq_shift_company_name"),
+        Index("idx_shift_company", "company_id"),
+    )
 
 
 

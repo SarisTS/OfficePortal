@@ -2,9 +2,11 @@ from pydantic import BaseModel
 from datetime import date
 from typing import List, Optional, Literal
 
+from app.schemas.base import StrictRequestModel
+
 
 # ---------- Food ----------
-class FoodItemCreate(BaseModel):
+class FoodItemCreate(StrictRequestModel):
     name: str
     category: Literal["BREAKFAST", "LUNCH", "DINNER"]
 
@@ -15,11 +17,11 @@ class FoodItemOut(BaseModel):
     category: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ---------- Menu ----------
-class DailyMenuCreate(BaseModel):
+class DailyMenuCreate(StrictRequestModel):
     date: date
     company_id: Optional[int] = None
     food_item_ids: List[int]
@@ -29,7 +31,7 @@ class DailyMenuItemOut(BaseModel):
     food: FoodItemOut
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class DailyMenuOut(BaseModel):
@@ -38,11 +40,11 @@ class DailyMenuOut(BaseModel):
     items: List[DailyMenuItemOut]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ---------- Selection ----------
-class FoodSelectionCreate(BaseModel):
+class FoodSelectionCreate(StrictRequestModel):
     date: date
     meal_type: Literal["BREAKFAST", "LUNCH", "DINNER"]
     food_item_id: int

@@ -1,146 +1,63 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
-from app.models.attendance import Attendance, Shift, AttendanceStatus
-from app.models.employee import Employee
-from app.models.leave import Leave, LeaveStatus
+
+from app.database.database import with_transaction
+from app.models.attendance import Attendance, AttendanceStatus
+from app.models.assignment import EmployeeShiftAssignment
+from app.models.employee import Employee, UserTypes
 from app.schemas.attendance import AttendanceUpdate
 from app.crud.auth import is_global_admin
-from app.models.assignment import EmployeeShiftAssignment, CompanyLocation
-from app.utils.distance import calculate_distance
-from sqlalchemy import or_
 
 
-class AttendanceService:
-
-    @staticmethod
-    def get_active_shift(db, employee_id, now):
-        return db.query(EmployeeShiftAssignment).filter(
+def _active_shift_id_for(db: Session, employee_id: int, on_date) -> int | None:
+    """Return the EmployeeShiftAssignment.shift_id active on `on_date`, or None."""
+    row = (
+        db.query(EmployeeShiftAssignment)
+        .filter(
             EmployeeShiftAssignment.employee_id == employee_id,
-            EmployeeShiftAssignment.start_date <= now.date(),
+            EmployeeShiftAssignment.start_date <= on_date,
             or_(
-                EmployeeShiftAssignment.end_date == None,
-                EmployeeShiftAssignment.end_date >= now.date()
-            )
-        ).first()
-
-    @staticmethod
-    def validate_location(emp_lat, emp_lon, location):
-        distance = calculate_distance(
-            emp_lat, emp_lon,
-            location.latitude, location.longitude
+                EmployeeShiftAssignment.end_date.is_(None),
+                EmployeeShiftAssignment.end_date >= on_date,
+            ),
         )
+        .first()
+    )
+    return row.shift_id if row else None
 
-        if distance > location.radius:
-            raise HTTPException(400, "Outside allowed location")
-
-    @staticmethod
-    def check_in(db, employee, lat, lon):
-
-        now = datetime.now(timezone.utc)
-
-        # 🔹 Get shift
-        assignment = AttendanceService.get_active_shift(db, employee.id, now)
-        if not assignment:
-            raise HTTPException(400, "No shift assigned")
-
-        shift = assignment.shift
-
-        # 🔹 Validate company
-        if shift.company_id != employee.company_id:
-            raise HTTPException(400, "Invalid shift")
-
-        # 🔹 Get location (company level)
-        location = db.query(CompanyLocation).filter(
-            CompanyLocation.company_id == employee.company_id
-        ).first()
-
-        if not location:
-            raise HTTPException(400, "No location configured")
-
-        # 🔹 Geo-fencing
-        AttendanceService.validate_location(lat, lon, location)
-
-        # 🔹 Prevent duplicate
-        attendance = db.query(Attendance).filter(
-            Attendance.employee_id == employee.id,
-            Attendance.date == now.date(),
-            Attendance.deleted_at == None
-        ).with_for_update().first()
-
-        if attendance and attendance.check_in:
-            return attendance
-
-        if not attendance:
-            attendance = Attendance(
-                employee_id=employee.id,
-                company_id=employee.company_id,
-                shift_id=shift.id,
-                date=now.date()
-            )
-            db.add(attendance)
-
-        attendance.check_in = now
-        attendance.check_in_lat = lat
-        attendance.check_in_lon = lon
-        attendance.location_id = location.id
-
-        # 🔹 Late logic
-        shift_start = datetime.combine(now.date(), shift.start_time)
-
-        late_minutes = max(0, int((now - shift_start).total_seconds() / 60))
-
-        if late_minutes > shift.grace_minutes:
-            attendance.late_minutes = late_minutes
-            attendance.attendance_status = AttendanceStatus.late
-
-        db.commit()
-        db.refresh(attendance)
-
-        return attendance
-    
-    @staticmethod
-    def check_out(db, employee, lat, lon):
-
-        now = datetime.now(timezone.utc)
-
-        attendance = db.query(Attendance).filter(
-            Attendance.employee_id == employee.id,
-            Attendance.check_in != None,
-            Attendance.check_out == None
-        ).with_for_update().first()
-
-        if not attendance:
-            raise HTTPException(400, "Check-in required")
-
-        attendance.check_out = now
-        attendance.check_out_lat = lat
-        attendance.check_out_lon = lon
-
-        # 🔹 Working hours
-        seconds = (attendance.check_out - attendance.check_in).total_seconds()
-        attendance.working_hours = round(seconds / 3600, 2)
-
-        db.commit()
-        db.refresh(attendance)
-
-        return attendance
+# NOTE: check-in / check-out used to live here as an AttendanceService class,
+# duplicating app/services/attendance_service.py. The routers only ever called
+# the services/ version, so the duplicate class was deleted in Phase 4. This
+# module now holds only the read/update/delete/manual-mark/leave-sync helpers.
 
 
 def get_attendance(db: Session, attendance_id: int, user):
 
-    attendance = db.query(Attendance).filter(
-        Attendance.id == attendance_id,
-        Attendance.deleted_at == None
-    ).first()
+    # joinedload(Attendance.employee) — the tenant check below reads
+    # attendance.employee.company_id, which would otherwise trigger a
+    # second SELECT per call.
+    attendance = (
+        db.query(Attendance)
+        .options(joinedload(Attendance.employee))
+        .filter(
+            Attendance.id == attendance_id,
+            Attendance.deleted_at == None,
+        )
+        .first()
+    )
 
     if not attendance:
         return None
 
-    if user.user_type == "employee":
+    # Previously `user.user_type == "employee"` compared an enum to a string
+    # and always evaluated False, letting any non-admin reach the next branch
+    # and 403 themselves only on a different check. Fix the comparison to use
+    # the UserTypes enum so the self-only rule actually applies.
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if attendance.employee_id != user.id:
             raise HTTPException(403, "Not allowed")
-
     elif not is_global_admin(user):
         if attendance.employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
@@ -158,10 +75,9 @@ def get_employee_attendance(db: Session, employee_id: int, user):
     if not employee:
         raise HTTPException(404, "Employee not found")
 
-    if user.user_type == "employee":
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if employee_id != user.id:
             raise HTTPException(403, "Not allowed")
-
     elif not is_global_admin(user):
         if employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
@@ -174,10 +90,15 @@ def get_employee_attendance(db: Session, employee_id: int, user):
 
 def update_attendance(db: Session, attendance_id: int, data: AttendanceUpdate, user):
 
-    attendance = db.query(Attendance).filter(
-        Attendance.id == attendance_id,
-        Attendance.deleted_at == None
-    ).first()
+    attendance = (
+        db.query(Attendance)
+        .options(joinedload(Attendance.employee))
+        .filter(
+            Attendance.id == attendance_id,
+            Attendance.deleted_at == None,
+        )
+        .first()
+    )
 
     if not attendance:
         return None
@@ -204,10 +125,15 @@ def update_attendance(db: Session, attendance_id: int, data: AttendanceUpdate, u
 
 def delete_attendance(db: Session, attendance_id: int, user):
 
-    attendance = db.query(Attendance).filter(
-        Attendance.id == attendance_id,
-        Attendance.deleted_at == None
-    ).first()
+    attendance = (
+        db.query(Attendance)
+        .options(joinedload(Attendance.employee))
+        .filter(
+            Attendance.id == attendance_id,
+            Attendance.deleted_at == None,
+        )
+        .first()
+    )
 
     if not attendance:
         return None
@@ -237,33 +163,77 @@ def mark_manual_attendance(db, employee_id, date, data, admin):
         if employee.company_id != admin.company_id:
             raise HTTPException(403, "Not allowed")
 
+    # An employee/staff user must belong to a company per the
+    # check_company_required constraint, but defend explicitly anyway —
+    # super_admin manual-marking an admin user wouldn't have a company.
+    if employee.company_id is None:
+        raise HTTPException(
+            400, "Cannot mark attendance for a user with no company"
+        )
+
     attendance = db.query(Attendance).filter(
         Attendance.employee_id == employee_id,
         Attendance.date == date,
-        Attendance.deleted_at == None
+        Attendance.deleted_at == None,
     ).first()
 
-    if not attendance:
-        attendance = Attendance(employee_id=employee_id, date=date)
-        db.add(attendance)
+    is_new = attendance is None
 
-    attendance.check_in = data.check_in
-    attendance.check_out = data.check_out
-    attendance.is_manual = True
-    attendance.marked_by = admin.id
-    attendance.manual_reason = data.reason
+    with with_transaction(db):
+        if is_new:
+            attendance = Attendance(
+                employee_id=employee_id,
+                # NOT NULL on the schema — previously omitted, causing the
+                # INSERT to fail. Sourced from the employee record.
+                company_id=employee.company_id,
+                # Best-effort: tag the active shift on that date if one
+                # exists. Nullable, so None is acceptable.
+                shift_id=_active_shift_id_for(db, employee_id, date),
+                date=date,
+            )
+            db.add(attendance)
 
-    if attendance.check_in and attendance.check_out:
-        seconds = (attendance.check_out - attendance.check_in).total_seconds()
-        attendance.working_hours = round(seconds / 3600, 2)
+        attendance.check_in = data.check_in
+        attendance.check_out = data.check_out
+        attendance.is_manual = True
+        attendance.manual_reason = data.reason
 
-    db.commit()
+        # Audit trail — was previously `attendance.marked_by`, which is not a
+        # column on the Attendance model (it would silently set a Python attr
+        # and never persist). Use the AuditMixin fields instead.
+        if is_new:
+            attendance.created_by = admin.id
+        attendance.updated_by = admin.id
+
+        if attendance.check_in and attendance.check_out:
+            seconds = (attendance.check_out - attendance.check_in).total_seconds()
+            if seconds < 0:
+                raise HTTPException(400, "check_out must be after check_in")
+            attendance.working_hours = round(seconds / 3600, 2)
+
     db.refresh(attendance)
-
     return attendance
 
 
 def apply_leave_to_attendance(db, leave):
+    """Mark every day in [leave.start_date, leave.end_date] as LEAVE.
+
+    Called from inside approve_leave's transaction — do NOT commit here.
+    The caller is responsible for committing or rolling back the whole
+    approve_leave + apply unit atomically.
+    """
+
+    # Resolve company_id once. Required because new Attendance rows have
+    # company_id NOT NULL, and the previous implementation omitted it,
+    # causing the INSERT to fail when no attendance row pre-existed.
+    employee = db.query(Employee).filter(
+        Employee.id == leave.employee_id,
+        Employee.deleted_at == None,
+    ).first()
+    if not employee or employee.company_id is None:
+        raise HTTPException(
+            400, "Cannot apply leave: employee or employee.company missing"
+        )
 
     current = leave.start_date
 
@@ -272,13 +242,15 @@ def apply_leave_to_attendance(db, leave):
         attendance = db.query(Attendance).filter(
             Attendance.employee_id == leave.employee_id,
             Attendance.date == current,
-            Attendance.deleted_at == None
+            Attendance.deleted_at == None,
         ).first()
 
         if not attendance:
             attendance = Attendance(
                 employee_id=leave.employee_id,
-                date=current
+                company_id=employee.company_id,
+                shift_id=_active_shift_id_for(db, leave.employee_id, current),
+                date=current,
             )
             db.add(attendance)
 

@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
+from app.schemas.base import StrictRequestModel
+
 # ==============================
 #   LOCATION SCHEMAS
 # ==============================
@@ -13,15 +15,24 @@ class LocationBase(BaseModel):
     postal_code : Optional[str] = None
     is_active   : bool = True
 
-class LocationCreate(BaseModel):
+
+class LocationCreate(StrictRequestModel):
     country_id  : int
     state_id    : int
     city_id     : int
-    postal_code : int
+    # Postal codes are strings worldwide (alphanumeric in UK/CA/etc., leading
+    # zeros must be preserved e.g. "01001"). Was previously typed as int,
+    # which silently disagreed with the CRUD layer treating it as str.
+    postal_code : Optional[str] = None
 
-class LocationUpdate(LocationCreate):
-    postal_code      : Optional[str]  = None
-    is_active        : Optional[bool] = True
+
+class LocationUpdate(StrictRequestModel):
+    country_id  : Optional[int]  = None
+    state_id    : Optional[int]  = None
+    city_id     : Optional[int]  = None
+    postal_code : Optional[str]  = None
+    is_active   : Optional[bool] = True
+
 
 class LocationOut(BaseModel):
     id          : int
@@ -51,10 +62,10 @@ class CountryBase(BaseModel):
     phone_code: Optional[str] = None
     is_active : bool = True
 
-class CountryCreate(CountryBase):
+class CountryCreate(CountryBase, StrictRequestModel):
     pass
 
-class CountryUpdate(CountryBase):
+class CountryUpdate(CountryBase, StrictRequestModel):
     pass
 
 class CountryOut(BaseModel):
@@ -80,7 +91,7 @@ class JSONCountryResponse(BaseModel):
     currency_symbol: Optional [str] = None
 
     class Config:
-        from_attributes =True
+        from_attributes = True
 
 # ==============================
 #   STATE SCHEMAS
@@ -92,10 +103,10 @@ class StateBase(BaseModel):
     country_id: int
     is_active : bool = True
 
-class StateCreate(StateBase):
+class StateCreate(StateBase, StrictRequestModel):
     pass
 
-class StateUpdate(StateBase):
+class StateUpdate(StateBase, StrictRequestModel):
     pass
 
 class StateOut(BaseModel):
@@ -120,7 +131,7 @@ class JSONStateResponse(BaseModel):
     type: Optional[str] = None
 
     class Config:
-        from_attributes =True
+        from_attributes = True
 
 # ==============================
 #   CITY SCHEMAS
@@ -133,10 +144,10 @@ class CityBase(BaseModel):
     is_active  : bool = True
 
 
-class CityCreate(CityBase):
+class CityCreate(CityBase, StrictRequestModel):
     pass
 
-class CityUpdate(CityBase):
+class CityUpdate(CityBase, StrictRequestModel):
     pass
 
 class CityOut(BaseModel):
@@ -157,9 +168,9 @@ class JSONCityResponse(BaseModel):
     name: str
     latitude : Optional [str] = None
     longitude : Optional [str] = None
-    
+
     class Config:
-        from_attributes =True
+        from_attributes = True
 
 class UserLocationOut(BaseModel):
     id          : int
@@ -187,17 +198,17 @@ class CompanyLocationBase(BaseModel):
     is_primary: bool
 
 
-class CompanyLocationCreate(CompanyLocationBase):
+class CompanyLocationCreate(CompanyLocationBase, StrictRequestModel):
     company_id: int
 
 
-class CompanyLocationUpdate(BaseModel):
-    name: Optional[str]
-    latitude: Optional[float]
-    longitude: Optional[float]
-    radius: Optional[int]
-    is_active: Optional[bool]
-    is_primary: Optional[bool]
+class CompanyLocationUpdate(StrictRequestModel):
+    name: Optional[str] = None
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+    radius: Optional[int] = Field(default=None, gt=0)
+    is_active: Optional[bool] = None
+    is_primary: Optional[bool] = None
 
 
 class CompanyLocationResponse(CompanyLocationBase):

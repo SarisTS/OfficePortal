@@ -1,10 +1,12 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-from app.models.employee import UserTypes
 from datetime import datetime
 
+from app.models.employee import UserTypes
+from app.schemas.base import StrictRequestModel
 
-class EmployeeCreate(BaseModel):
+
+class EmployeeCreate(StrictRequestModel):
     name: str
     email: EmailStr
     company_id: int
@@ -21,7 +23,7 @@ class EmployeeCreate(BaseModel):
     pincode : Optional[str] = None
 
 
-class EmployeeUpdate(BaseModel):
+class EmployeeUpdate(StrictRequestModel):
     roll_no: Optional[str] = None
     name: str
     email: EmailStr

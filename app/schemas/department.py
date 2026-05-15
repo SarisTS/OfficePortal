@@ -1,13 +1,15 @@
 from pydantic import BaseModel
 from typing import Optional
 
+from app.schemas.base import StrictRequestModel
 
-class DepartmentCreate(BaseModel):
+
+class DepartmentCreate(StrictRequestModel):
     company_id: int
     dept_name: str
 
 
-class DepartmentUpdate(BaseModel):
+class DepartmentUpdate(StrictRequestModel):
     dept_name: Optional[str] = None
     company_id: Optional[int] = None
 

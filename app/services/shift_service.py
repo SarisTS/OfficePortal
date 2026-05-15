@@ -21,21 +21,22 @@ class ShiftService:
         return shift
 
     @staticmethod
-    def get_shifts(db, user):
+    def get_shifts(db, user, skip: int = 0, limit: int = 10):
 
         if not is_global_admin(user):
             raise HTTPException(403, "Not allowed")
-        
-        return db.query(Shift).filter(
-            Shift.deleted_at == None
-        ).all()
+
+        base = db.query(Shift).filter(Shift.deleted_at == None)
+        total = base.count()
+        items = base.order_by(Shift.id).offset(skip).limit(limit).all()
+        return total, items
 
     @staticmethod
     def get_shift(db, shift_id, user):
 
         if not is_global_admin(user):
             raise HTTPException(403, "Not allowed")
-        
+
         shift = db.query(Shift).filter(
             Shift.id == shift_id,
             Shift.deleted_at == None
@@ -45,22 +46,23 @@ class ShiftService:
             raise HTTPException(404, "Shift not found")
 
         return shift
-    
+
     @staticmethod
-    def get_shifts_by_company(db, company_id, user):
+    def get_shifts_by_company(db, company_id, user, skip: int = 0, limit: int = 10):
 
         if not is_global_admin(user):
             raise HTTPException(403, "Not allowed")
-        
-        shifts = db.query(Shift).filter(
+
+        base = db.query(Shift).filter(
             Shift.company_id == company_id,
-            Shift.deleted_at == None
-        ).all()
-
-        if not shifts:
-            raise HTTPException(404, "Shifts not found for this company")
-
-        return shifts
+            Shift.deleted_at == None,
+        )
+        total = base.count()
+        items = base.order_by(Shift.id).offset(skip).limit(limit).all()
+        # Empty page is a valid result — return {total: 0, items: []} rather
+        # than 404'ing, which would prevent the caller from distinguishing
+        # "no shifts" from "company not found".
+        return total, items
 
     @staticmethod
     def update_shift(db, shift_id, data, user):
