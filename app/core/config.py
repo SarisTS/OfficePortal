@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # pytz zone name; invalid values fail fast at startup.
     TIMEZONE: str = "Asia/Kolkata"
 
+    # Redis (OTP storage). Defaults to a local Redis with no auth so
+    # `uvicorn main:app` works against a vanilla `redis-server`. Override
+    # REDIS_HOST=redis when running via docker-compose.
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: str = ""  # empty = no auth
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

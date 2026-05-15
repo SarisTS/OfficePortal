@@ -123,6 +123,54 @@ conftest docstring — these checks live in production only.
 
 ---
 
+## Docker
+
+```bash
+docker build -t office-portal-backend .
+
+docker run --rm -p 8000:8000 \
+  --env-file .env \
+  -v "$(pwd)/location.json:/app/location.json:ro" \
+  office-portal-backend
+```
+
+Notes:
+
+- `--env-file .env` injects runtime config; `.env` is gitignored AND
+  dockerignored — never baked into the image.
+- `location.json` is dockerignored too (kept out of the image to avoid
+  bloat) — mount it from the host at startup, as shown above.
+- The image runs `uvicorn` with a single worker as `app` (non-root,
+  uid 1001) and ships a `HEALTHCHECK` that hits `/health`.
+- Override the entrypoint to run migrations in CI/CD:
+  `docker run ... office-portal-backend alembic upgrade head`.
+
+### Docker Compose (full local stack)
+
+`docker-compose.yml` bundles Postgres 18, Redis 7, a one-shot
+migration step, and the API:
+
+```bash
+cp .env.example .env       # if you haven't already
+docker compose up --build  # add -d to detach
+```
+
+Bring-up order is enforced via healthchecks:
+
+1. `db` starts → `pg_isready` passes
+2. `migrate` runs `alembic upgrade head` once and exits 0
+3. `redis` starts → `redis-cli ping` passes
+4. `app` boots once both `migrate` (succeeded) and `redis` (healthy)
+   are green
+
+Everything is on the compose-private network — `db` and `redis` are
+not port-mapped to the host. The API is exposed on `localhost:8000`.
+
+Stop with `docker compose down`. Add `-v` to also drop the Postgres
+data volume (full reset on next `up`).
+
+---
+
 ## Project Layout
 
 ```
