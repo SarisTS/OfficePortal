@@ -1,5 +1,7 @@
+from contextlib import contextmanager
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 
@@ -37,3 +39,27 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+@contextmanager
+def with_transaction(db: Session):
+    """Commit on success, rollback on any exception.
+
+    Usage:
+
+        with with_transaction(db):
+            db.add(thing)
+            db.flush()           # raises here → rollback + re-raise
+            other_thing.field = "x"
+
+    The wrapped block must NOT call ``db.commit()`` itself — leave that to
+    the helper so multi-statement units stay atomic. HTTPException raised
+    inside the block is treated the same as any other: rollback, re-raise,
+    let FastAPI turn it into a response.
+    """
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
