@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
 from app.models.attendance import Attendance, Shift, AttendanceStatus
-from app.models.employee import Employee
+from app.models.employee import Employee, UserTypes
 from app.models.leave import Leave, LeaveStatus
 from app.schemas.attendance import AttendanceUpdate
 from app.crud.auth import is_global_admin
@@ -137,10 +137,13 @@ def get_attendance(db: Session, attendance_id: int, user):
     if not attendance:
         return None
 
-    if user.user_type == "employee":
+    # Previously `user.user_type == "employee"` compared an enum to a string
+    # and always evaluated False, letting any non-admin reach the next branch
+    # and 403 themselves only on a different check. Fix the comparison to use
+    # the UserTypes enum so the self-only rule actually applies.
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if attendance.employee_id != user.id:
             raise HTTPException(403, "Not allowed")
-
     elif not is_global_admin(user):
         if attendance.employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
@@ -158,10 +161,9 @@ def get_employee_attendance(db: Session, employee_id: int, user):
     if not employee:
         raise HTTPException(404, "Employee not found")
 
-    if user.user_type == "employee":
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if employee_id != user.id:
             raise HTTPException(403, "Not allowed")
-
     elif not is_global_admin(user):
         if employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
