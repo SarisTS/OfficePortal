@@ -90,10 +90,13 @@ def require_user(user = Depends(get_current_user)):
 
 
 def is_global_admin(user) -> bool:
-    # NOTE: this comparison is currently broken — user.user_type is a UserTypes
-    # enum and these are bare strings, so this always returns False. The whole
-    # CRUD/service layer has been operating with super_admins silently treated
-    # as company-scoped users. Fixing it flips authorization scope across ~10
-    # call sites, so it is deliberately left as-is until Phase 2 (RBAC pass).
-    # See chore/backend-hardening Phase 1b commit message for context.
-    return user.user_type in ["super_admin", "office_admin"]
+    # "Global" here means "not scoped to a single company" — that is super_admin
+    # only. office_admin is bound to their own company.
+    #
+    # This function previously compared the UserTypes enum to bare strings, so
+    # it always returned False, which silently denied super_admin every check
+    # in the CRUD/service layer (see crud/leave.py:36 etc.: "Super Admin →
+    # allowed everywhere"). New code should use the helpers in
+    # app/core/permissions.py instead; this name is kept because ~30 call sites
+    # depend on it.
+    return user.user_type == UserTypes.super_admin
