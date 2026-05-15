@@ -2,19 +2,18 @@ from pydantic import BaseModel
 from datetime import date, time
 from typing import Optional
 
+from app.schemas.base import StrictRequestModel
 
-class ShiftCreate(BaseModel):
+
+class ShiftCreate(StrictRequestModel):
     name: str
     start_time: time
     end_time: time
     grace_minutes: int
     company_id: int
 
-    class Config:
-        from_attributes = True
 
-
-class ShiftUpdate(BaseModel):
+class ShiftUpdate(StrictRequestModel):
     name: str | None = None
     start_time: time | None = None
     end_time: time | None = None
@@ -34,13 +33,13 @@ class ShiftResponse(BaseModel):
         from_attributes = True
 
 
-class ShiftAssignmentCreate(BaseModel):
+class ShiftAssignmentCreate(StrictRequestModel):
     employee_id: int
     shift_id: int
     start_date: date
 
 
-class ShiftChangeRequest(BaseModel):
+class ShiftChangeRequest(StrictRequestModel):
     employee_id: int
     shift_id: int
     start_date: date

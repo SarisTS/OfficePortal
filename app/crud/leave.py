@@ -1,11 +1,25 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException
 from datetime import datetime, timezone
 from app.models.leave import Leave, LeaveStatus
-from app.models.employee import Employee
+from app.models.employee import Employee, UserTypes
 from app.schemas.leave import LeaveCreate, LeaveUpdate, LeaveResponse
 from app.crud.attendance import apply_leave_to_attendance
 from app.crud.auth import is_global_admin
+
+
+def _leave_with_employee(db: Session, leave_id: int):
+    """Fetch a Leave with its employee eagerly loaded.
+
+    Several callers immediately read ``leave.employee.company_id`` for the
+    tenant check; doing this in one round-trip avoids the lazy SELECT.
+    """
+    return (
+        db.query(Leave)
+        .options(joinedload(Leave.employee))
+        .filter(Leave.id == leave_id, Leave.deleted_at == None)
+        .first()
+    )
 
 def create_leave(db: Session, leave: LeaveCreate, user) -> LeaveResponse:
 
@@ -24,7 +38,7 @@ def create_leave(db: Session, leave: LeaveCreate, user) -> LeaveResponse:
     # 🔐 ACCESS CONTROL
 
     # 👤 Employee → only self
-    if user.user_type == "employee":
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if leave.employee_id != user.id:
             raise HTTPException(403, "Not allowed")
 
@@ -59,13 +73,15 @@ def create_leave(db: Session, leave: LeaveCreate, user) -> LeaveResponse:
 
 def approve_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
 
-    leave = db.query(Leave).filter(
-        Leave.id == leave_id,
-        Leave.deleted_at == None
-    ).first()
+    leave = _leave_with_employee(db, leave_id)
 
     if not leave:
         raise HTTPException(404, "Leave not found")
+
+    # 🔒 Tenant check — office_admin can only approve in their company.
+    if not is_global_admin(admin):
+        if leave.employee.company_id != admin.company_id:
+            raise HTTPException(403, "Not allowed")
 
     if leave.status != LeaveStatus.pending:
         raise HTTPException(400, "Already processed")
@@ -87,14 +103,16 @@ def approve_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
 
 def reject_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
 
-    leave = db.query(Leave).filter(
-        Leave.id == leave_id,
-        Leave.deleted_at == None
-    ).first()
+    leave = _leave_with_employee(db, leave_id)
 
     if not leave:
         raise HTTPException(404, "Leave not found")
-    
+
+    # 🔒 Tenant check — office_admin can only reject in their company.
+    if not is_global_admin(admin):
+        if leave.employee.company_id != admin.company_id:
+            raise HTTPException(403, "Not allowed")
+
     if leave.status != LeaveStatus.pending:
         raise HTTPException(400, "Already processed")
 
@@ -110,15 +128,12 @@ def reject_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
 
 def get_leave(db: Session, leave_id: int, user):
 
-    leave = db.query(Leave).filter(
-        Leave.id == leave_id,
-        Leave.deleted_at == None
-    ).first()
+    leave = _leave_with_employee(db, leave_id)
 
     if not leave:
         return None
 
-    if user.user_type == "employee":
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if leave.employee_id != user.id:
             raise HTTPException(403, "Not allowed")
 
@@ -133,7 +148,7 @@ def get_leaves(db: Session, user, skip=0, limit=10):
 
     query = db.query(Leave).filter(Leave.deleted_at == None)
 
-    if user.user_type == "employee":
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         query = query.filter(Leave.employee_id == user.id)
 
     elif not is_global_admin(user):
@@ -154,7 +169,7 @@ def get_employee_leaves(db: Session, employee_id: int, user):
     if not employee:
         raise HTTPException(404, "Employee not found")
 
-    if user.user_type == "employee":
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if employee_id != user.id:
             raise HTTPException(403, "Not allowed")
 
@@ -170,15 +185,12 @@ def get_employee_leaves(db: Session, employee_id: int, user):
 
 def update_leave(db: Session, leave_id: int, data: LeaveUpdate, user)-> LeaveResponse:
 
-    leave = db.query(Leave).filter(
-        Leave.id == leave_id,
-        Leave.deleted_at == None
-    ).first()
+    leave = _leave_with_employee(db, leave_id)
 
     if not leave:
         return None
     
-    if user.user_type == "employee":
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if leave.employee_id != user.id:
             raise HTTPException(403, "Not allowed")
 
@@ -229,15 +241,12 @@ def update_leave(db: Session, leave_id: int, data: LeaveUpdate, user)-> LeaveRes
 
 def delete_leave(db: Session, leave_id: int, user):
 
-    leave = db.query(Leave).filter(
-        Leave.id == leave_id,
-        Leave.deleted_at == None
-    ).first()
+    leave = _leave_with_employee(db, leave_id)
 
     if not leave:
         return None
     
-    if user.user_type == "employee":
+    if user.user_type in (UserTypes.staff, UserTypes.employee):
         if leave.employee_id != user.id:
             raise HTTPException(403, "Not allowed")
 

@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, status, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 
+from app.crud.auth import require_admin, require_user
 from app.database.database import get_db
+from app.models.employee import Employee
 from app.schemas.location import LocationCreate, LocationUpdate, LocationOut, JSONStateResponse,JSONCityResponse,JSONCountryResponse
 from app.crud import location as crud
 from app.utils.api_response import ApiResponse,PaginatedResponse
@@ -10,7 +12,11 @@ from app.utils.api_response import ApiResponse,PaginatedResponse
 router = APIRouter(tags=["Locations"])
 
 @router.post("/create", response_model=ApiResponse[LocationOut])
-def create(payload: LocationCreate, db: Session = Depends(get_db)):
+def create(
+    payload: LocationCreate,
+    db: Session = Depends(get_db),
+    _: Employee = Depends(require_admin),
+):
     location = crud.create_location(db, payload)
     return {
         "status" : status.HTTP_200_OK,
@@ -19,7 +25,12 @@ def create(payload: LocationCreate, db: Session = Depends(get_db)):
     }
 
 @router.get("/", response_model = ApiResponse[PaginatedResponse[LocationOut]])
-def get_locations(db: Session = Depends(get_db), page: int = Query(1, ge=1), limit: int = Query(10, le=50),):
+def get_locations(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, le=50),
+    _: Employee = Depends(require_user),
+):
     total, locations = crud.get_locations(db, page=page, limit=limit)
     if not locations:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Locations not found")
@@ -35,7 +46,11 @@ def get_locations(db: Session = Depends(get_db), page: int = Query(1, ge=1), lim
     }
 
 @router.get("/{location_id}", response_model = ApiResponse[LocationOut])
-def get_location_by_id(location_id: int, db: Session = Depends(get_db)):
+def get_location_by_id(
+    location_id: int,
+    db: Session = Depends(get_db),
+    _: Employee = Depends(require_user),
+):
     location = crud.get_location_by_id(db, location_id)
     if not location:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Location not found")
@@ -46,7 +61,12 @@ def get_location_by_id(location_id: int, db: Session = Depends(get_db)):
     }
 
 @router.put("/update/{location_id}", response_model=ApiResponse[LocationOut])
-def update_location(location_id: int, payload: LocationUpdate, db: Session = Depends(get_db)):
+def update_location(
+    location_id: int,
+    payload: LocationUpdate,
+    db: Session = Depends(get_db),
+    _: Employee = Depends(require_admin),
+):
     location = crud.update_location(db, location_id, payload)
     if not location:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Location not found")
@@ -57,7 +77,11 @@ def update_location(location_id: int, payload: LocationUpdate, db: Session = Dep
     }
 
 @router.delete("/delete/{location_id}", response_model=ApiResponse[LocationOut])
-def delete_location(location_id: int, db: Session = Depends(get_db)):
+def delete_location(
+    location_id: int,
+    db: Session = Depends(get_db),
+    _: Employee = Depends(require_admin),
+):
     data = crud.delete_location(db, location_id)
     if not data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Location not found")
@@ -69,7 +93,8 @@ def delete_location(location_id: int, db: Session = Depends(get_db)):
 @router.get("/json/countries", response_model=ApiResponse[List[JSONCountryResponse]])
 def get_json_countries(
     id    : int | None = None,
-    search: str | None = None, 
+    search: str | None = None,
+    _: Employee = Depends(require_user),
 ):
     countries = crud.get_json_countries()
     if not countries:
@@ -103,7 +128,8 @@ def get_json_countries(
 def get_state_by_country_id(
     country_id : int,
     id         : int | None = None,
-    search     : str | None = None
+    search     : str | None = None,
+    _: Employee = Depends(require_user),
 ):
     states = crud.get_state_by_country_id(country_id)
     if not states:
@@ -136,7 +162,8 @@ def get_state_by_country_id(
 def get_city_by_state_id(
     state_id : int,
     id       : int | None = None,
-    search   : str | None = None
+    search   : str | None = None,
+    _: Employee = Depends(require_user),
 ):
     cities = crud.get_city_by_state_id(state_id)
     if not cities:

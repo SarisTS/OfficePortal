@@ -1,10 +1,17 @@
-from fastapi import FastAPI, Request, HTTPException
+import time
+import uuid
+
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.logger import get_logger
 from app.core.config import settings
+from app.core.redis import redis_client
+from app.database.database import get_db
 
 from app.routers.auth import router as auth_router
 from app.routers.employee import router as employee_router
@@ -35,28 +42,57 @@ app.add_middleware(
     https_only=False
 )
 
-# CORS
+# CORS — env-driven allowlist. "*" + allow_credentials=True is rejected by
+# browsers, so when wildcard is configured we drop credentials to keep the
+# preflight valid (and warn loudly because that combination is a smell).
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+if not _cors_origins:
+    _cors_origins = ["http://localhost:3000"]
+
+if "*" in _cors_origins:
+    logger.warning(
+        "CORS_ORIGINS contains '*' — disabling allow_credentials. "
+        "Configure an explicit origin list before production."
+    )
+    _allow_credentials = False
+else:
+    _allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # change in production
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# Logging
+# Request-id + access log. Mints a UUID per request (or trusts an inbound
+# X-Request-ID if the caller sent one — useful for client/server log
+# correlation in CI or when an upstream proxy already set it). Stashes it on
+# request.state and binds it to loguru's context so every log statement
+# emitted inside the request includes it.
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
-    logger.info(f"{request.method} {request.url}")
+async def request_id_middleware(request: Request, call_next):
+    incoming = request.headers.get("X-Request-ID")
+    request_id = incoming if incoming else uuid.uuid4().hex
+    request.state.request_id = request_id
 
-    try:
-        response = await call_next(request)
-        logger.info(f"Status: {response.status_code}")
+    start = time.perf_counter()
+    with logger.contextualize(request_id=request_id):
+        logger.info(f"--> {request.method} {request.url.path}")
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception("Unhandled error")
+            raise
+        elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+        logger.info(
+            f"<-- {request.method} {request.url.path} "
+            f"{response.status_code} ({elapsed_ms}ms)"
+        )
+        response.headers["X-Request-ID"] = request_id
         return response
-    except Exception:
-        logger.exception("Unhandled error")
-        raise
 
 # Error Response
 @app.exception_handler(HTTPException)
@@ -89,6 +125,38 @@ def root():
         "message": "API is running",
         "data": None
     }
+
+
+# Liveness + readiness: DB is required, Redis is best-effort (used for OTPs only).
+@app.get("/health")
+def health(db: Session = Depends(get_db)):
+    db_ok = True
+    db_error = None
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as e:
+        db_ok = False
+        db_error = str(e)
+        logger.exception("Healthcheck: DB ping failed")
+
+    redis_ok = True
+    redis_error = None
+    try:
+        redis_client.ping()
+    except Exception as e:
+        redis_ok = False
+        redis_error = str(e)
+        logger.warning(f"Healthcheck: Redis ping failed: {e}")
+
+    body = {
+        "status": "ok" if db_ok else "degraded",
+        "checks": {
+            "database": {"ok": db_ok, "error": db_error},
+            "redis": {"ok": redis_ok, "error": redis_error},
+        },
+        "environment": settings.APP_ENVIRONMENT,
+    }
+    return JSONResponse(status_code=200 if db_ok else 503, content=body)
 
 
 # Routers

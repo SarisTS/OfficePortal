@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, status
-from app.utils.api_response import ApiResponse
+from fastapi import APIRouter, Depends, Query, status
+from app.utils.api_response import ApiResponse, PaginatedResponse
 from app.services.shift_service import ShiftService
 from app.schemas.assignment import ShiftCreate, ShiftResponse, ShiftUpdate
 from sqlalchemy.orm import Session
@@ -23,17 +23,19 @@ def create_shift(
         "data": result
     }
 
-@router.get("/", response_model=ApiResponse[list[ShiftResponse]])
+@router.get("/", response_model=ApiResponse[PaginatedResponse[ShiftResponse]])
 def get_shifts(
     db: Session = Depends(get_db),
-    user = Depends(require_admin)
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    user = Depends(require_admin),
 ):
-    result = ShiftService.get_shifts(db, user)
+    total, items = ShiftService.get_shifts(db, user, skip=skip, limit=limit)
 
     return {
         "status": status.HTTP_200_OK,
         "message": "Shifts Listed successfully",
-        "data": result
+        "data": {"skip": skip, "limit": limit, "total": total, "items": items},
     }
 
 
@@ -51,18 +53,22 @@ def get_shift(
         "data": result
     }
 
-@router.get("/company/{company_id}", response_model=ApiResponse[list[ShiftResponse]])
-def get_shift(
+@router.get("/company/{company_id}", response_model=ApiResponse[PaginatedResponse[ShiftResponse]])
+def get_shifts_by_company(
     company_id: int,
     db: Session = Depends(get_db),
-    user = Depends(require_admin)
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    user = Depends(require_admin),
 ):
-    result = ShiftService.get_shifts_by_company(db, company_id, user)
+    total, items = ShiftService.get_shifts_by_company(
+        db, company_id, user, skip=skip, limit=limit
+    )
 
     return {
         "status": status.HTTP_200_OK,
         "message": "Shifts listed for this company successfully",
-        "data": result
+        "data": {"skip": skip, "limit": limit, "total": total, "items": items},
     }
 
 

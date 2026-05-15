@@ -1,12 +1,14 @@
 from pydantic import BaseModel
 from typing import Optional
 
+from app.schemas.base import StrictRequestModel
 
-class RoleCreate(BaseModel):
+
+class RoleCreate(StrictRequestModel):
     role_name: str
 
 
-class RoleUpdate(BaseModel):
+class RoleUpdate(StrictRequestModel):
     role_name: Optional[str] = None
 
 
