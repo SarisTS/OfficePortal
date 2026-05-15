@@ -12,7 +12,9 @@ from app.models.employee import Employee, UserTypes
 # assignment history that the assignment router actually calls.
 
 
-def get_employee_shift_history(db, employee_id: int, user):
+def get_employee_shift_history(
+    db, employee_id: int, user, skip: int = 0, limit: int = 10
+):
 
     # 🔒 Validate employee
     employee = db.query(Employee).filter(
@@ -32,12 +34,18 @@ def get_employee_shift_history(db, employee_id: int, user):
         if employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
 
-    # 📜 Fetch history
-    assignments = db.query(EmployeeShiftAssignment).filter(
+    # 📜 Fetch history (paginated, most recent first)
+    base = db.query(EmployeeShiftAssignment).filter(
         EmployeeShiftAssignment.employee_id == employee_id
-    ).order_by(EmployeeShiftAssignment.start_date.desc()).all()
-
-    return assignments
+    )
+    total = base.count()
+    items = (
+        base.order_by(EmployeeShiftAssignment.start_date.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return total, items
 
 
 def get_current_shift(db, employee_id: int, user):

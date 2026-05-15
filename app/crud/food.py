@@ -36,11 +36,14 @@ def create_daily_menu(db: Session, data):
     db.commit()
     return menu
 
-def get_food_items(db: Session, user):
+def get_food_items(db: Session, user, skip: int = 0, limit: int = 10):
     if not is_global_admin(user):
         raise HTTPException(403, "Not authorized")
 
-    return db.query(FoodItem).all()
+    base = db.query(FoodItem)
+    total = base.count()
+    items = base.order_by(FoodItem.id).offset(skip).limit(limit).all()
+    return total, items
 
 def get_menu_by_date(db: Session, date, company_id=None):
     return db.query(DailyMenu).filter(
