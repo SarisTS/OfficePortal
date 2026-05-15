@@ -1,8 +1,10 @@
 from pydantic import BaseModel
 from typing import Optional
 
+from app.schemas.base import StrictRequestModel
 
-class CompanyCreate(BaseModel):
+
+class CompanyCreate(StrictRequestModel):
 
     name: str
     email: Optional[str] = None
@@ -17,7 +19,7 @@ class CompanyCreate(BaseModel):
     parent_company_id: Optional[int] = None
 
 
-class CompanyUpdate(BaseModel):
+class CompanyUpdate(StrictRequestModel):
 
     name: Optional[str] = None
     email: Optional[str] = None

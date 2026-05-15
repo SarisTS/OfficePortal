@@ -1,53 +1,62 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-from app.models.employee import UserTypes
 
-class RegisterRequest(BaseModel):
+from app.models.employee import UserTypes
+from app.schemas.base import StrictRequestModel
+
+
+class RegisterRequest(StrictRequestModel):
     email: EmailStr
     password: str
     user_type: str
     role_id: int
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(StrictRequestModel):
     email: EmailStr
     password: str
 
 
-class ChangePasswordSchema(BaseModel):
+class ChangePasswordSchema(StrictRequestModel):
     old_password: str
     new_password: str
 
 
-class ForgotPasswordRequest(BaseModel):
+class ForgotPasswordRequest(StrictRequestModel):
     email: EmailStr
 
 
-class ResetPasswordRequest(BaseModel):
+class ResetPasswordRequest(StrictRequestModel):
     token: str
     new_password: str
+
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
 
-class EmployeeLoginSchema(BaseModel):
+
+class EmployeeLoginSchema(StrictRequestModel):
     roll_no: str
     password: str
 
-class OTPRequestSchema(BaseModel):
+
+class OTPRequestSchema(StrictRequestModel):
     mobile: str
 
-class OTPVerifySchema(BaseModel):
+
+class OTPVerifySchema(StrictRequestModel):
     mobile: str
     otp: str
 
-class ResetPasswordSchema(BaseModel):
+
+class ResetPasswordSchema(StrictRequestModel):
     mobile: str
     otp: str
     new_password: str
 
-class CreateEmployeeSchema(BaseModel):
+
+class CreateEmployeeSchema(StrictRequestModel):
     name: str
     user_type: UserTypes
 
