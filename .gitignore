@@ -29,3 +29,9 @@ Thumbs.db
 
 # Secrets
 secrets.json
+
+# Bulk reference data. ~38MB countries/states/cities dataset loaded by
+# app/crud/location.py at runtime. Removed from git history in May 2026
+# (was bloating every clone). Each deployment needs to copy this file
+# onto disk manually — see README "Data files" section.
+location.json

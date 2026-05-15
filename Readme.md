@@ -1,108 +1,150 @@
-# 🏢 Office Portal
+# Office Portal — Backend
 
-A web-based Office Management System built to manage employee attendance, roles, and company operations efficiently.
-
----
-
-## 🚀 Features
-
-* 👨‍💼 Employee Management
-* 🕒 Attendance Tracking (Check-in / Check-out)
-* 📍 Geo-fencing support
-* 🔐 Role-Based Access Control
-* 🏢 Multi-company support
-* 📊 Admin Dashboard (Planned)
+A multi-tenant HRMS backend: attendance with geo-fencing, shift assignments,
+leave management, hostels, daily food selection, and per-company RBAC.
+Built on FastAPI + PostgreSQL + SQLAlchemy.
 
 ---
 
-## 🛠️ Tech Stack
+## Features
 
-### Backend
-
-* FastAPI
-* PostgreSQL
-* SQLAlchemy
-
-### Frontend
-
-* Laravel (Migrating to Django)
+- **Authentication** — admin (email/password) and employee (mobile + OTP)
+  login flows. JWT bearer tokens, Google OAuth for admins.
+- **Role-based access control** — `super_admin`, `office_admin`, `staff`,
+  `employee`. Per-company tenant scoping enforced in CRUD + service layers.
+- **Attendance** — geo-fenced check-in/check-out, configurable shift windows
+  (early-buffer, late grace, night-shift handling), manual marking by admins.
+- **Shift management** — shift definitions, assignment history, change with
+  overlap detection.
+- **Leave** — request, approve/reject, overlap prevention, auto-apply to
+  attendance on approval.
+- **Hostels** — per-company directory with geographic-location linkage.
+- **Food** — daily menu management + employee selection with meal-time cutoffs.
+- **Observability** — per-request UUID, structured (JSON) logging on demand,
+  `/health` probe for liveness checks.
 
 ---
 
-## ⚙️ Installation
+## Tech Stack
 
-### 1. Clone the repository
+- **Framework**: FastAPI, Starlette
+- **DB**: PostgreSQL, SQLAlchemy 2.0, Alembic
+- **Auth**: python-jose (JWT), passlib + bcrypt, Authlib (Google OAuth)
+- **Cache**: Redis (OTP storage)
+- **Config**: pydantic, pydantic-settings
+- **Logging**: loguru (text + JSON modes)
+- **Timezone**: pytz (configurable via `TIMEZONE` env var; default
+  `Asia/Kolkata`)
+- **Tests**: pytest with an in-memory SQLite fixture
+
+---
+
+## Getting Started
+
+### 1. Clone
 
 ```bash
-git clone https://github.com/your-username/office-portal.git
-cd office-portal
+git clone https://github.com/SarisTS/OfficePortal.git
+cd OfficePortal
 ```
 
-### 2. Setup Backend
+### 2. Virtual env and dependencies
 
 ```bash
-cd backend
 python -m venv venv
-venv\Scripts\activate   # Windows
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # macOS/Linux
 pip install -r requirements.txt
 ```
 
-### 3. Setup Database
+Add `pip install -r requirements-dev.txt` if you want to run the test suite.
 
-* Create PostgreSQL database
-* Update `.env` file with DB credentials
+### 3. Configure
 
-### 4. Run Server
+```bash
+cp .env.example .env
+```
+
+Fill in the real values. Generate a strong `SECRET_KEY` with:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+### 4. Database
+
+Create the Postgres database referenced in `DATABASE_URL`, then apply
+migrations:
+
+```bash
+alembic upgrade head
+alembic current     # expect: <latest revision> (head)
+```
+
+### 5. Data files
+
+`app/crud/location.py` reads `location.json` from the project root at
+startup — a ~38 MB countries/states/cities dataset used for geographic
+lookups. It's **gitignored** (kept out of history to keep clones light)
+and must be present on disk for the app to start.
+
+Copy the file into the project root from a known source (e.g. your
+existing dev machine, an S3 bucket, or a build artifact) before
+running the server. If the file is missing, location-related endpoints
+will fail at runtime.
+
+### 6. Run
 
 ```bash
 uvicorn main:app --reload
 ```
 
----
+Interactive API docs: <http://localhost:8000/docs>
+(FastAPI auto-generates Swagger UI from the routers.)
 
-## 📡 API Endpoints
-
-| Method | Endpoint              | Description    |
-| ------ | --------------------- | -------------- |
-| POST   | /login                | User Login     |
-| POST   | /attendance/check-in  | Mark Check-in  |
-| POST   | /attendance/check-out | Mark Check-out |
+Liveness/readiness probe: <http://localhost:8000/health>
+(returns DB + Redis status; DB failure → 503, Redis is best-effort.)
 
 ---
 
-## 📁 Project Structure
+## Tests
+
+```bash
+pip install -r requirements-dev.txt   # one-time
+pytest
+```
+
+The suite uses an in-memory SQLite database via `tests/conftest.py`, so
+no real Postgres is required. SQLite-specific caveats (partial unique
+indexes, row locking, native ENUM types) are documented in the
+conftest docstring — these checks live in production only.
+
+---
+
+## Project Layout
 
 ```
 OfficePortal/
-│── backend/
-│   ├── app/
-│   ├── models/
-│   ├── routes/
-│   └── main.py
-│
-│── frontend/
-│
-│── README.md
+├── app/
+│   ├── core/           settings, security, permissions, oauth, logger, redis
+│   ├── database/       engine, session factory, get_db, with_transaction
+│   ├── models/         SQLAlchemy ORM models
+│   ├── schemas/        Pydantic request/response models (StrictRequestModel base)
+│   ├── crud/           DB access functions (one module per resource)
+│   ├── services/       Business logic (attendance, shift assignment, etc.)
+│   ├── routers/        FastAPI routers
+│   └── utils/          api_response wrapper, distance/hash helpers
+├── migrations/         Alembic
+├── tests/              pytest suite
+├── main.py             FastAPI app, middleware, exception handlers
+├── alembic.ini
+├── requirements.txt
+├── requirements-dev.txt
+└── .env.example
 ```
 
 ---
 
-## 🔮 Future Improvements
+## Author
 
-* Shift Management System
-* Reports & Analytics
-* Mobile App Integration
-* Notification System
-
----
-
-## 👨‍💻 Author
-
-Sarish
-Software Developer
-
----
-
-## 📌 Notes
-
-This project is under active development.
+Sarish — Software Developer

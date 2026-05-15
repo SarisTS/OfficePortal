@@ -15,6 +15,11 @@ class HostelCreate(StrictRequestModel):
 
     location_id: Optional[int] = None
 
+    # super_admin can target any company. office_admin should leave this
+    # null — the CRUD layer stamps it from their session — and a
+    # mismatched value will be rejected with 403.
+    company_id: Optional[int] = None
+
 
 class HostelUpdate(StrictRequestModel):
     name: Optional[str] = None
@@ -25,6 +30,10 @@ class HostelUpdate(StrictRequestModel):
     landmark: Optional[str] = None
 
     location_id: Optional[int] = None
+
+    # Only super_admin can move a hostel between companies. office_admin
+    # supplying a different company_id is refused at the CRUD layer.
+    company_id: Optional[int] = None
 
 
 class HostelResponse(BaseModel):
@@ -37,5 +46,6 @@ class HostelResponse(BaseModel):
     landmark: Optional[str] = None
 
     location_id: Optional[int] = None
+    company_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
