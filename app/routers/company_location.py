@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
-from app.utils.api_response import ApiResponse
+from app.utils.api_response import ApiResponse, PaginatedResponse
 from app.services.company_location_service import CompanyLocationService
 from app.schemas.location import CompanyLocationResponse, CompanyLocationCreate, CompanyLocationUpdate
 from app.database.database import get_db
@@ -23,17 +23,19 @@ def create_location(
         "data": result
     }
 
-@router.get("/", response_model=ApiResponse[list[CompanyLocationResponse]])
+@router.get("/", response_model=ApiResponse[PaginatedResponse[CompanyLocationResponse]])
 def get_locations(
     db: Session = Depends(get_db),
-    user = Depends(require_user)
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    user = Depends(require_user),
 ):
-    result = CompanyLocationService.get_locations(db, user)
+    total, items = CompanyLocationService.get_locations(db, user, skip=skip, limit=limit)
 
     return {
         "status": status.HTTP_200_OK,
         "message": "Locations fetched",
-        "data": result
+        "data": {"skip": skip, "limit": limit, "total": total, "items": items},
     }
 
 @router.get("/{location_id}", response_model=ApiResponse[CompanyLocationResponse])

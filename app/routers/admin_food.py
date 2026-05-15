@@ -1,12 +1,13 @@
 # routers/admin_food.py
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from datetime import date
 from app.schemas.food import *
 from app.crud.food import *
 from app.database.database import get_db
 from app.crud.auth import require_admin
+from app.utils.api_response import PaginatedResponse
 from typing import List
 
 router = APIRouter(tags=["Admin Food"])
@@ -20,12 +21,20 @@ def create_item(
 ):
     return create_food_item(db, data)
 
-@router.get("/items", response_model=List[FoodItemOut], status_code=200)
+@router.get("/items", response_model=PaginatedResponse[FoodItemOut], status_code=200)
 def get_items(
     db: Session = Depends(get_db),
-    user=Depends(require_admin)
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    user=Depends(require_admin),
 ):
-    return get_food_items(db, user)
+    total, items = get_food_items(db, user, skip=skip, limit=limit)
+    return {
+        "skip": skip,
+        "limit": limit,
+        "total": total,
+        "items": items,
+    }
 
 
 @router.post("/menu", response_model=DailyMenuOut, status_code=201)

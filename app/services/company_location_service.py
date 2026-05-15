@@ -40,7 +40,7 @@ class CompanyLocationService:
         return location
     
     @staticmethod
-    def get_locations(db: Session, user):
+    def get_locations(db: Session, user, skip: int = 0, limit: int = 10):
 
         query = db.query(CompanyLocation).filter(
             CompanyLocation.deleted_at == None
@@ -51,7 +51,9 @@ class CompanyLocationService:
                 CompanyLocation.company_id == user.company_id
             )
 
-        return query.all()
+        total = query.count()
+        items = query.order_by(CompanyLocation.id).offset(skip).limit(limit).all()
+        return total, items
     
 
     @staticmethod
