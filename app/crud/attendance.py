@@ -1,130 +1,16 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
-from app.models.attendance import Attendance, Shift, AttendanceStatus
+
+from app.models.attendance import Attendance, AttendanceStatus
 from app.models.employee import Employee, UserTypes
-from app.models.leave import Leave, LeaveStatus
 from app.schemas.attendance import AttendanceUpdate
 from app.crud.auth import is_global_admin
-from app.models.assignment import EmployeeShiftAssignment, CompanyLocation
-from app.utils.distance import calculate_distance
-from sqlalchemy import or_
 
-
-class AttendanceService:
-
-    @staticmethod
-    def get_active_shift(db, employee_id, now):
-        return db.query(EmployeeShiftAssignment).filter(
-            EmployeeShiftAssignment.employee_id == employee_id,
-            EmployeeShiftAssignment.start_date <= now.date(),
-            or_(
-                EmployeeShiftAssignment.end_date == None,
-                EmployeeShiftAssignment.end_date >= now.date()
-            )
-        ).first()
-
-    @staticmethod
-    def validate_location(emp_lat, emp_lon, location):
-        distance = calculate_distance(
-            emp_lat, emp_lon,
-            location.latitude, location.longitude
-        )
-
-        if distance > location.radius:
-            raise HTTPException(400, "Outside allowed location")
-
-    @staticmethod
-    def check_in(db, employee, lat, lon):
-
-        now = datetime.now(timezone.utc)
-
-        # 🔹 Get shift
-        assignment = AttendanceService.get_active_shift(db, employee.id, now)
-        if not assignment:
-            raise HTTPException(400, "No shift assigned")
-
-        shift = assignment.shift
-
-        # 🔹 Validate company
-        if shift.company_id != employee.company_id:
-            raise HTTPException(400, "Invalid shift")
-
-        # 🔹 Get location (company level)
-        location = db.query(CompanyLocation).filter(
-            CompanyLocation.company_id == employee.company_id
-        ).first()
-
-        if not location:
-            raise HTTPException(400, "No location configured")
-
-        # 🔹 Geo-fencing
-        AttendanceService.validate_location(lat, lon, location)
-
-        # 🔹 Prevent duplicate
-        attendance = db.query(Attendance).filter(
-            Attendance.employee_id == employee.id,
-            Attendance.date == now.date(),
-            Attendance.deleted_at == None
-        ).with_for_update().first()
-
-        if attendance and attendance.check_in:
-            return attendance
-
-        if not attendance:
-            attendance = Attendance(
-                employee_id=employee.id,
-                company_id=employee.company_id,
-                shift_id=shift.id,
-                date=now.date()
-            )
-            db.add(attendance)
-
-        attendance.check_in = now
-        attendance.check_in_lat = lat
-        attendance.check_in_lon = lon
-        attendance.location_id = location.id
-
-        # 🔹 Late logic
-        shift_start = datetime.combine(now.date(), shift.start_time)
-
-        late_minutes = max(0, int((now - shift_start).total_seconds() / 60))
-
-        if late_minutes > shift.grace_minutes:
-            attendance.late_minutes = late_minutes
-            attendance.attendance_status = AttendanceStatus.late
-
-        db.commit()
-        db.refresh(attendance)
-
-        return attendance
-    
-    @staticmethod
-    def check_out(db, employee, lat, lon):
-
-        now = datetime.now(timezone.utc)
-
-        attendance = db.query(Attendance).filter(
-            Attendance.employee_id == employee.id,
-            Attendance.check_in != None,
-            Attendance.check_out == None
-        ).with_for_update().first()
-
-        if not attendance:
-            raise HTTPException(400, "Check-in required")
-
-        attendance.check_out = now
-        attendance.check_out_lat = lat
-        attendance.check_out_lon = lon
-
-        # 🔹 Working hours
-        seconds = (attendance.check_out - attendance.check_in).total_seconds()
-        attendance.working_hours = round(seconds / 3600, 2)
-
-        db.commit()
-        db.refresh(attendance)
-
-        return attendance
+# NOTE: check-in / check-out used to live here as an AttendanceService class,
+# duplicating app/services/attendance_service.py. The routers only ever called
+# the services/ version, so the duplicate class was deleted in Phase 4. This
+# module now holds only the read/update/delete/manual-mark/leave-sync helpers.
 
 
 def get_attendance(db: Session, attendance_id: int, user):
