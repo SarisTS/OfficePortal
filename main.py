@@ -39,11 +39,26 @@ app.add_middleware(
     https_only=False
 )
 
-# CORS
+# CORS — env-driven allowlist. "*" + allow_credentials=True is rejected by
+# browsers, so when wildcard is configured we drop credentials to keep the
+# preflight valid (and warn loudly because that combination is a smell).
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+if not _cors_origins:
+    _cors_origins = ["http://localhost:3000"]
+
+if "*" in _cors_origins:
+    logger.warning(
+        "CORS_ORIGINS contains '*' — disabling allow_credentials. "
+        "Configure an explicit origin list before production."
+    )
+    _allow_credentials = False
+else:
+    _allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # change in production
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
