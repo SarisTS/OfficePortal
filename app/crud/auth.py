@@ -1,15 +1,13 @@
 from app.utils.hash import verify_password
-from app.core.security import create_access_token
+from app.core.security import create_access_token, verify_access_token
 from app.models.employee import Employee, UserTypes
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.core.logger import get_logger
-from app.core.config import settings
 
 logger = get_logger()
 
@@ -31,7 +29,7 @@ def login_user(email: str, password: str, db: Session):
         )
 
     token = create_access_token(
-        data={"user_id": user.id}
+        data={"sub": str(user.id)}
     )
 
     return {
@@ -46,25 +44,39 @@ def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
+    payload = verify_access_token(token)
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: missing subject",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: malformed subject",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-        user_id = payload.get("sub")   # 👈 now correct
+    user = (
+        db.query(Employee)
+        .filter(Employee.id == user_id_int, Employee.deleted_at.is_(None))
+        .first()
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or deactivated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
+    return user
 
-        user = db.query(Employee).filter(Employee.id == int(user_id)).first()
-
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-
-        return user
-
-    except Exception:
-        logger.exception("Invalid Token")
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
 
 def require_admin(user = Depends(get_current_user)):
     if user.user_type not in [UserTypes.super_admin, UserTypes.office_admin]:
@@ -77,5 +89,11 @@ def require_user(user = Depends(get_current_user)):
     return user
 
 
-def is_global_admin(user):
+def is_global_admin(user) -> bool:
+    # NOTE: this comparison is currently broken — user.user_type is a UserTypes
+    # enum and these are bare strings, so this always returns False. The whole
+    # CRUD/service layer has been operating with super_admins silently treated
+    # as company-scoped users. Fixing it flips authorization scope across ~10
+    # call sites, so it is deliberately left as-is until Phase 2 (RBAC pass).
+    # See chore/backend-hardening Phase 1b commit message for context.
     return user.user_type in ["super_admin", "office_admin"]
