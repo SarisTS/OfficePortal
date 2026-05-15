@@ -1,10 +1,12 @@
 from pydantic import BaseModel, field_validator
 from datetime import date
 from typing import Optional
+
 from app.models.leave import LeaveType, LeaveStatus
+from app.schemas.base import StrictRequestModel
 
 
-class LeaveCreate(BaseModel):
+class LeaveCreate(StrictRequestModel):
     employee_id: int
     leave_type: LeaveType
 
@@ -21,7 +23,7 @@ class LeaveCreate(BaseModel):
             raise ValueError("end_date must be >= start_date")
         return v
     
-class LeaveUpdate(BaseModel):
+class LeaveUpdate(StrictRequestModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
 

@@ -1,9 +1,10 @@
 from pydantic import BaseModel
 from typing import Optional
 
+from app.schemas.base import StrictRequestModel
 
 
-class HostelCreate(BaseModel):
+class HostelCreate(StrictRequestModel):
 
     name: str
     flat_no: Optional[str] = None
@@ -15,7 +16,7 @@ class HostelCreate(BaseModel):
     location_id: Optional[int] = None
 
 
-class HostelUpdate(BaseModel):
+class HostelUpdate(StrictRequestModel):
     name: Optional[str] = None
     flat_no: Optional[str] = None
 

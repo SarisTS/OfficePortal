@@ -1,10 +1,17 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime
 from typing import Optional
+
 from app.models.attendance import AttendanceStatus
+from app.schemas.base import StrictRequestModel
 
 
-class AttendanceBase(BaseModel):
+# Reusable WGS84 lat/lon bounds.
+Latitude = Field(..., ge=-90, le=90)
+Longitude = Field(..., ge=-180, le=180)
+
+
+class AttendanceBase(StrictRequestModel):
     shift_id: int
     date: date
 
@@ -13,8 +20,8 @@ class AttendanceCreate(AttendanceBase):
     employee_id: int
     check_in: Optional[datetime] = None
     check_out: Optional[datetime] = None
-    lat: float
-    lon: float
+    lat: float = Latitude
+    lon: float = Longitude
 
     @field_validator("check_out")
     def validate_checkout(cls, v, values):
@@ -22,9 +29,9 @@ class AttendanceCreate(AttendanceBase):
         if v and check_in and v < check_in:
             raise ValueError("check_out cannot be before check_in")
         return v
-    
-    
-class AttendanceUpdate(BaseModel):
+
+
+class AttendanceUpdate(StrictRequestModel):
     check_in: Optional[datetime] = None
     check_out: Optional[datetime] = None
     attendance_status: Optional[AttendanceStatus] = None
@@ -35,22 +42,22 @@ class AttendanceUpdate(BaseModel):
         if v and check_in and v < check_in:
             raise ValueError("Invalid checkout time")
         return v
-    
-    
-class ManualAttendanceCreate(BaseModel):
+
+
+class ManualAttendanceCreate(StrictRequestModel):
     check_in: Optional[datetime] = None
     check_out: Optional[datetime] = None
     reason: Optional[str] = None
-    
+
 
 class AttendanceResponse(BaseModel):
     id: int
 
     employee_id: int
-    employee_name: Optional[str] = None 
+    employee_name: Optional[str] = None
 
     shift_id: Optional[int]
-    shift_name: Optional[str] = None   
+    shift_name: Optional[str] = None
 
     date: date
 
@@ -74,11 +81,11 @@ class AttendanceListResponse(BaseModel):
     items: list[AttendanceResponse]
 
 
-class CheckInRequest(BaseModel):
-    lat: float
-    lon: float
+class CheckInRequest(StrictRequestModel):
+    lat: float = Latitude
+    lon: float = Longitude
 
 
-class CheckOutRequest(BaseModel):
-    lat: float
-    lon: float
+class CheckOutRequest(StrictRequestModel):
+    lat: float = Latitude
+    lon: float = Longitude
