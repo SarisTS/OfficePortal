@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
@@ -35,10 +35,18 @@ def _active_shift_id_for(db: Session, employee_id: int, on_date) -> int | None:
 
 def get_attendance(db: Session, attendance_id: int, user):
 
-    attendance = db.query(Attendance).filter(
-        Attendance.id == attendance_id,
-        Attendance.deleted_at == None
-    ).first()
+    # joinedload(Attendance.employee) — the tenant check below reads
+    # attendance.employee.company_id, which would otherwise trigger a
+    # second SELECT per call.
+    attendance = (
+        db.query(Attendance)
+        .options(joinedload(Attendance.employee))
+        .filter(
+            Attendance.id == attendance_id,
+            Attendance.deleted_at == None,
+        )
+        .first()
+    )
 
     if not attendance:
         return None
@@ -82,10 +90,15 @@ def get_employee_attendance(db: Session, employee_id: int, user):
 
 def update_attendance(db: Session, attendance_id: int, data: AttendanceUpdate, user):
 
-    attendance = db.query(Attendance).filter(
-        Attendance.id == attendance_id,
-        Attendance.deleted_at == None
-    ).first()
+    attendance = (
+        db.query(Attendance)
+        .options(joinedload(Attendance.employee))
+        .filter(
+            Attendance.id == attendance_id,
+            Attendance.deleted_at == None,
+        )
+        .first()
+    )
 
     if not attendance:
         return None
@@ -112,10 +125,15 @@ def update_attendance(db: Session, attendance_id: int, data: AttendanceUpdate, u
 
 def delete_attendance(db: Session, attendance_id: int, user):
 
-    attendance = db.query(Attendance).filter(
-        Attendance.id == attendance_id,
-        Attendance.deleted_at == None
-    ).first()
+    attendance = (
+        db.query(Attendance)
+        .options(joinedload(Attendance.employee))
+        .filter(
+            Attendance.id == attendance_id,
+            Attendance.deleted_at == None,
+        )
+        .first()
+    )
 
     if not attendance:
         return None
