@@ -18,6 +18,15 @@ class Hostel(Base, AuditMixin):
 
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
     location = relationship("Location")
+
+    # Nullable so existing rows (created before per-company scoping was
+    # introduced) remain valid. New rows are stamped with the creator's
+    # company_id for office_admin or accept it from the payload for
+    # super_admin. NULL = legacy / global hostel — readable by any admin,
+    # modifiable only by super_admin until they classify it.
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    company = relationship("Company")
+
     employees = relationship("Employee", back_populates="hostel")
 
     __table_args__ = (

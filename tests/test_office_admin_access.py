@@ -14,6 +14,8 @@ from app.models.company import Company
 from app.models.attendance import Shift
 from app.models.employee import Employee, UserTypes
 from app.models.food import FoodItem
+from app.models.hostel import Hostel
+from app.models.location import Location
 from app.models.role import Role
 from app.utils.hash import hash_password
 
@@ -162,3 +164,124 @@ def test_office_admin_can_list_food_catalog(client, two_companies_and_admins, db
     body = r.json()
     assert body["total"] >= 1
     assert any(item["name"] == "Idli" for item in body["items"])
+
+
+# ---------------------------------------------------------------------------
+# Hostel scoping (added with the Hostel.company_id migration)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def hostels_with_companies(db_session, two_companies_and_admins):
+    """Seed a Location and three hostels: one in each company + one legacy NULL."""
+    fx = dict(two_companies_and_admins)
+
+    location = Location(country_id=1, state_id=1, city_id=1)
+    db_session.add(location)
+    db_session.commit()
+    db_session.refresh(location)
+
+    hostel_a = Hostel(
+        name="HostelA", location_id=location.id,
+        company_id=fx["company_a"].id,
+    )
+    hostel_b = Hostel(
+        name="HostelB", location_id=location.id,
+        company_id=fx["company_b"].id,
+    )
+    hostel_legacy = Hostel(
+        name="LegacyHostel", location_id=location.id,
+        company_id=None,
+    )
+    db_session.add_all([hostel_a, hostel_b, hostel_legacy])
+    db_session.commit()
+    for h in (hostel_a, hostel_b, hostel_legacy):
+        db_session.refresh(h)
+
+    fx.update(
+        location=location, hostel_a=hostel_a,
+        hostel_b=hostel_b, hostel_legacy=hostel_legacy,
+    )
+    return fx
+
+
+def test_office_admin_create_hostel_stamps_own_company(
+    client, hostels_with_companies
+):
+    """office_admin creating a hostel with no company_id in payload gets it
+    auto-stamped to their own company_id."""
+    fx = hostels_with_companies
+    token = _login(client, OFFICE_A_EMAIL)
+
+    r = client.post(
+        "/hostels/",
+        json={"name": "NewByOfficeA", "location_id": fx["location"].id},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["company_id"] == fx["company_a"].id
+
+
+def test_office_admin_cannot_create_hostel_for_other_company(
+    client, hostels_with_companies
+):
+    """Smuggling another company_id in the payload is refused with 403."""
+    fx = hostels_with_companies
+    token = _login(client, OFFICE_A_EMAIL)
+
+    r = client.post(
+        "/hostels/",
+        json={
+            "name": "Smuggle",
+            "location_id": fx["location"].id,
+            "company_id": fx["company_b"].id,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 403
+
+
+def test_office_admin_lists_own_and_legacy_hostels_only(
+    client, hostels_with_companies
+):
+    """office_admin sees their company's hostels + NULL-company legacy
+    rows, but NOT another company's hostels."""
+    fx = hostels_with_companies
+    token = _login(client, OFFICE_A_EMAIL)
+
+    r = client.get("/hostels/", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    names = {item["name"] for item in r.json()["data"]}
+    assert "HostelA" in names
+    assert "LegacyHostel" in names
+    assert "HostelB" not in names
+
+
+def test_office_admin_cannot_update_other_companys_hostel(
+    client, hostels_with_companies
+):
+    fx = hostels_with_companies
+    token = _login(client, OFFICE_A_EMAIL)
+
+    r = client.put(
+        f"/hostels/{fx['hostel_b'].id}",
+        json={"name": "HackedName"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 403
+
+
+def test_office_admin_cannot_modify_legacy_null_hostel(
+    client, hostels_with_companies
+):
+    """Legacy (company_id IS NULL) hostels are read-only for office_admin
+    until super_admin classifies them."""
+    fx = hostels_with_companies
+    token = _login(client, OFFICE_A_EMAIL)
+
+    r = client.put(
+        f"/hostels/{fx['hostel_legacy'].id}",
+        json={"name": "TryingToClassify"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 403
