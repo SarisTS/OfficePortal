@@ -213,7 +213,11 @@ class AttendanceService:
         attendance.check_out = now
         attendance.check_out_lat = lat
         attendance.check_out_lon = lon
-        attendance.checkout_location_id = valid_location.id
+        # Was `attendance.checkout_location_id = ...` — there is no such
+        # column. SQLAlchemy was setting a Python attribute that never
+        # persisted, so the checkout location was being silently dropped.
+        # See migration 3e1d8f4a6c92 which added the real column.
+        attendance.check_out_location_id = valid_location.id
 
         # 🔹 Working hours
         seconds = (attendance.check_out - attendance.check_in).total_seconds()

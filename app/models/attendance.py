@@ -36,7 +36,13 @@ class Attendance(Base, AuditMixin):
     check_out_lat = Column(Float)
     check_out_lon = Column(Float)
 
+    # company_location_id stores the location validated at CHECK-IN.
+    # check_out_location_id stores the location validated at CHECK-OUT —
+    # employees can legitimately check in at the office and check out at
+    # a client site (or vice-versa), so the two are tracked separately.
+    # Both are nullable: manual attendance has no geo-fence to validate.
     company_location_id = Column(Integer, ForeignKey("company_locations.id"))
+    check_out_location_id = Column(Integer, ForeignKey("company_locations.id"))
 
     working_hours = Column(Float)
     late_minutes = Column(Integer, default=0)
@@ -50,7 +56,12 @@ class Attendance(Base, AuditMixin):
 
     employee = relationship("Employee")
     shift = relationship("Shift")
-    company_location = relationship("CompanyLocation")
+    company_location = relationship(
+        "CompanyLocation", foreign_keys=[company_location_id]
+    )
+    check_out_location = relationship(
+        "CompanyLocation", foreign_keys=[check_out_location_id]
+    )
 
     __table_args__ = (
         UniqueConstraint("employee_id", "date", name="unique_employee_attendance"),
