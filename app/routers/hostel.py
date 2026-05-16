@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
@@ -24,8 +24,8 @@ def create_hostel(
 
 @router.get("/", response_model=ApiResponse[list[HostelResponse]])
 def get_hostels(
-    skip: int = 0,
-    limit: int = 10,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
     user = Depends(require_admin)
 ):

@@ -161,7 +161,10 @@ def test_office_admin_can_list_food_catalog(client, two_companies_and_admins, db
     token = _login(client, OFFICE_A_EMAIL)
     r = client.get("/admin/food/items", headers=_auth(token))
     assert r.status_code == 200, r.text
-    body = r.json()
+    # Phase 1 stabilization: every endpoint now returns the standard
+    # {status, message, data} ApiResponse envelope. The food module
+    # previously bypassed it.
+    body = r.json()["data"]
     assert body["total"] >= 1
     assert any(item["name"] == "Idli" for item in body["items"])
 
