@@ -77,6 +77,20 @@ def db_session():
         connection.close()
 
 
+# POST /employees/ queues a welcome email via BackgroundTasks. In Starlette's
+# TestClient, background-task exceptions propagate out of the request call, so
+# any test that creates an employee will dial real SMTP unless we patch the
+# sender. Local .env often has working Gmail creds; CI's .env (copied from
+# .env.example) has placeholders that Google rejects with 535 BadCredentials.
+# Globally silencing here keeps individual test files from having to remember.
+@pytest.fixture(autouse=True)
+def _silence_employee_email(monkeypatch):
+    monkeypatch.setattr(
+        "app.crud.employee.send_employee_credentials_email",
+        lambda *a, **kw: None,
+    )
+
+
 @pytest.fixture()
 def client(db_session):
     """FastAPI TestClient with the get_db dependency overridden.

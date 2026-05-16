@@ -69,14 +69,8 @@ def _upload(client, token: str, csv_text: str, filename: str = "import.csv"):
     )
 
 
-# Welcome emails are queued via BackgroundTasks. In tests we patch the
-# function so they don't actually try to dial SMTP.
-@pytest.fixture(autouse=True)
-def _silence_email(monkeypatch):
-    monkeypatch.setattr(
-        "app.crud.employee.send_employee_credentials_email",
-        lambda *a, **kw: None,
-    )
+# Welcome-email silencing lives in tests/conftest.py (autouse, session-wide)
+# so any test that calls POST /employees/ is covered without per-file fixtures.
 
 
 # ---------------------------------------------------------------------------
