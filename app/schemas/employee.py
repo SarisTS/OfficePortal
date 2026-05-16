@@ -92,3 +92,12 @@ class EmployeeResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class EmployeeBulkImportResult(BaseModel):
+    """Response shape for POST /employees/import — mirrors the bulk
+    patterns used by holiday and payslip generation: a list of created
+    rows plus a `skipped` list whose entries carry the row number and
+    per-row error details so the admin can fix and re-upload."""
+    created: list[EmployeeResponse]
+    skipped: list[dict]

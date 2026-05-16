@@ -75,6 +75,14 @@ class SalaryStructureResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SalaryStructureBulkImportResult(BaseModel):
+    """Response shape for POST /salary-structures/import. Same envelope
+    as EmployeeBulkImportResult and CompanyHolidayBulkResult — clients
+    get a uniform bulk-result shape across the API."""
+    created: list[SalaryStructureResponse]
+    skipped: list[dict]
+
+
 # ---------- Payslip ----------
 
 class PayslipGenerateRequest(StrictRequestModel):

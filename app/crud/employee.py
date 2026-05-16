@@ -418,6 +418,85 @@ def delete_employee(db: Session, employee_id: int, user):
         raise
 
 
+# ---------------------------------------------------------------------------
+# Bulk CSV import
+# ---------------------------------------------------------------------------
+
+def bulk_import_employees(
+    db: Session, csv_text: str, actor, background_tasks: BackgroundTasks,
+):
+    """Parse CSV text + call create_employee per row.
+
+    Conventions:
+      - header row (first line) maps to EmployeeCreate field names
+      - unknown columns are ignored (admin convenience)
+      - empty cells → None so optional fields take their defaults
+      - per-row failures captured in `skipped` rather than aborting:
+          - Pydantic validation errors  → row schema error
+          - HTTPException from create_employee (duplicate email, etc.)
+              → reason as detail string
+      - row numbering starts at 2 (row 1 is the header) so the indices
+        match what a spreadsheet would display
+      - office_admin's company_id is force-stamped from the actor (any
+        company_id in the CSV is ignored), matching the bulk-holiday
+        pattern. super_admin gets company_id from the CSV as-is.
+
+    Returns (created, skipped). Caller serializes to EmployeeResponse.
+    """
+    import csv as _csv
+    import io as _io
+    from pydantic import ValidationError
+
+    from app.crud.auth import is_global_admin
+
+    reader = _csv.DictReader(_io.StringIO(csv_text))
+    known_fields = set(EmployeeCreate.model_fields.keys())
+
+    created: list[Employee] = []
+    skipped: list[dict] = []
+
+    for row_idx, row in enumerate(reader, start=2):
+        # Drop unknown columns; coerce empty strings to None.
+        cleaned = {
+            k: (v if v != "" else None)
+            for k, v in row.items()
+            if k in known_fields
+        }
+
+        # Tenant scoping: office_admin's CSV company_id is overridden.
+        if not is_global_admin(actor):
+            cleaned["company_id"] = actor.company_id
+
+        try:
+            schema = EmployeeCreate(**cleaned)
+        except ValidationError as exc:
+            skipped.append({
+                "row_number": row_idx,
+                # include_context=False drops the `ctx` field which can
+                # carry raw exception objects (ValueError from field
+                # validators) that Pydantic's JSON serializer can't
+                # encode through the response model.
+                "errors": exc.errors(include_context=False),
+            })
+            continue
+
+        try:
+            emp = create_employee(db, schema, actor, background_tasks)
+            created.append(emp)
+        except HTTPException as exc:
+            skipped.append({
+                "row_number": row_idx,
+                "errors": [{"detail": str(exc.detail)}],
+            })
+        except Exception as exc:  # defensive — bubbled from inner commit
+            skipped.append({
+                "row_number": row_idx,
+                "errors": [{"detail": str(exc)}],
+            })
+
+    return created, skipped
+
+
 def update_own_profile(db: Session, user: Employee, data) -> Employee:
     """Apply a self-service profile edit.
 

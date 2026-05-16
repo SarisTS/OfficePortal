@@ -6,9 +6,12 @@ salary, POST a new row with a later effective_from rather than mutating
 an old one (though Update is allowed for correcting typos on a freshly
 created structure).
 """
+import csv as _csv
+import io as _io
 from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.permissions import (
@@ -17,6 +20,7 @@ from app.core.permissions import (
 from app.database.database import with_transaction
 from app.models.employee import Employee
 from app.models.payslip import SalaryStructure
+from app.schemas.payslip import SalaryStructureCreate
 
 
 def _target_employee_or_403(db: Session, employee_id: int, actor):
@@ -165,3 +169,66 @@ def get_current_structure(
         .order_by(SalaryStructure.effective_from.desc())
         .first()
     )
+
+
+# ---------------------------------------------------------------------------
+# Bulk CSV import
+# ---------------------------------------------------------------------------
+
+def bulk_import_structures(db: Session, csv_text: str, actor):
+    """Parse CSV text + call create_structure per row.
+
+    Same conventions as crud.employee.bulk_import_employees:
+      - header maps to SalaryStructureCreate field names
+      - unknown columns ignored, empty cells → None
+      - per-row failures captured (validation, 403 cross-company,
+        duplicate (employee_id, effective_from))
+      - row numbering starts at 2 (row 1 = header)
+
+    Tenant scoping is enforced inside create_structure via the
+    `_target_employee_or_403` check — office_admin importing for an
+    employee in another company gets a 403 captured per-row.
+
+    Returns (created, skipped).
+    """
+    reader = _csv.DictReader(_io.StringIO(csv_text))
+    known_fields = set(SalaryStructureCreate.model_fields.keys())
+
+    created: list[SalaryStructure] = []
+    skipped: list[dict] = []
+
+    for row_idx, row in enumerate(reader, start=2):
+        cleaned = {
+            k: (v if v != "" else None)
+            for k, v in row.items()
+            if k in known_fields
+        }
+
+        try:
+            schema = SalaryStructureCreate(**cleaned)
+        except ValidationError as exc:
+            skipped.append({
+                "row_number": row_idx,
+                # include_context=False drops the `ctx` field which can
+                # carry raw exception objects (ValueError from field
+                # validators) that Pydantic's JSON serializer can't
+                # encode through the response model.
+                "errors": exc.errors(include_context=False),
+            })
+            continue
+
+        try:
+            structure = create_structure(db, schema, actor)
+            created.append(structure)
+        except HTTPException as exc:
+            skipped.append({
+                "row_number": row_idx,
+                "errors": [{"detail": str(exc.detail)}],
+            })
+        except Exception as exc:  # defensive
+            skipped.append({
+                "row_number": row_idx,
+                "errors": [{"detail": str(exc)}],
+            })
+
+    return created, skipped
