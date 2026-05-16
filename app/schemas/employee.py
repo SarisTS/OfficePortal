@@ -40,6 +40,27 @@ class EmployeeUpdate(StrictRequestModel):
     pincode : Optional[str] = None
 
 
+class ProfileUpdate(StrictRequestModel):
+    """Self-service profile edit — narrow allowlist of fields an employee
+    is permitted to change about themselves. Anything not listed here
+    (name, roll_no, role_id, user_type, company/department/hostel,
+    is_verified, is_active) is admin-only and goes through PUT
+    /employees/{id}.
+
+    StrictRequestModel's extra="forbid" makes unknown fields a 422 at
+    parse time, so attempts to smuggle e.g. user_type are rejected
+    before the handler sees them.
+    """
+    mobile: Optional[str] = None
+    email: Optional[EmailStr] = None
+    address_line_1: Optional[str] = None
+    address_line_2: Optional[str] = None
+    landmark: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+
+
 class EmployeeResponse(BaseModel):
     id: int
     roll_no: Optional[str] = None
