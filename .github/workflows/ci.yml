@@ -42,3 +42,55 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  compose-smoke:
+    name: docker compose smoke
+    runs-on: ubuntu-latest
+    # Runs in parallel with `test`. They cover different surfaces —
+    # pytest exercises the Python layer with SQLite + mocked Redis;
+    # this one builds the real images, brings up Postgres + Redis,
+    # runs alembic upgrade head, and hits /health on a live container.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Provide test .env
+        # docker compose reads this for SECRET_KEY etc. Placeholder
+        # values from the example are fine — /health doesn't exercise
+        # JWT, OAuth, or email.
+        run: cp .env.example .env
+
+      - name: Stub location.json
+        # app/crud/location.py reads this file at runtime, and the
+        # compose `app` service bind-mounts it from the project root
+        # (it's gitignored, normally not in CI's working copy).
+        # /health doesn't touch geo lookups, so a near-empty stub
+        # satisfies the volume mount without shipping ~38 MB of data.
+        run: echo '[]' > location.json
+
+      - name: Build and start the stack
+        # --wait blocks until every service's healthcheck passes,
+        # or --wait-timeout fires. 180s gives the first build room
+        # for pip install + image pulls on a cold runner.
+        run: docker compose up --build --wait --wait-timeout 180
+
+      - name: Probe /health
+        run: |
+          response=$(curl --silent --show-error --fail http://localhost:8000/health)
+          echo "$response" | jq .
+          db_ok=$(echo "$response" | jq -r '.checks.database.ok')
+          redis_ok=$(echo "$response" | jq -r '.checks.redis.ok')
+          if [ "$db_ok" != "true" ] || [ "$redis_ok" != "true" ]; then
+            echo "Health check failed: db=$db_ok redis=$redis_ok"
+            exit 1
+          fi
+          echo "All checks green."
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
