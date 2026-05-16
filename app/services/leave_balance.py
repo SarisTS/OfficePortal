@@ -26,13 +26,10 @@ from app.models.leave import LeaveBalance, LeavePolicy, LeaveType
 # ---------------------------------------------------------------------------
 
 def compute_leave_days(start_date: date, end_date: date, is_half_day: bool) -> float:
-    """Return how many days a leave consumes from the ledger.
+    """Pure-math day count — calendar days inclusive, half-day → 0.5.
 
-    Convention (locked in during planning):
-      - calendar days, inclusive: `(end - start).days + 1`
-      - half-day → 0.5, regardless of date range (callers ensure the
-        half-day case is a single-day request)
-      - no weekend/holiday awareness yet — refining is a follow-up
+    Does NOT consult the holiday calendar; for that, use
+    billable_leave_days() which wraps this and subtracts holidays.
 
     Float so half-day math works without rounding.
     """
@@ -45,6 +42,39 @@ def compute_leave_days(start_date: date, end_date: date, is_half_day: bool) -> f
         return 0.5
 
     return float((end_date - start_date).days + 1)
+
+
+def billable_leave_days(
+    db: Session,
+    company_id: int | None,
+    start_date: date,
+    end_date: date,
+    is_half_day: bool,
+) -> float:
+    """compute_leave_days minus any holidays falling inside [start, end]
+    for the employee's company.
+
+    Half-day leaves short-circuit at 0.5 (they're a single half-day by
+    convention — holidays don't apply). If company_id is None (e.g. the
+    actor isn't bound to a company, which shouldn't happen for leave-
+    takers but defends defensively), holidays are NOT subtracted.
+
+    All-holidays case: a 3-day leave whose days are all holidays
+    debits 0 from the balance — the Leave row is still recorded for
+    audit but the ledger is untouched (they didn't actually take any
+    leave).
+    """
+    raw = compute_leave_days(start_date, end_date, is_half_day)
+    if is_half_day or company_id is None:
+        return raw
+
+    # Import lazily so this module doesn't pull crud/holiday at module
+    # load (avoids a potential circular import if crud/holiday ever
+    # needs to call back into leave_balance).
+    from app.crud.holiday import holiday_dates_in_range
+
+    holidays = holiday_dates_in_range(db, company_id, start_date, end_date)
+    return float(max(0.0, raw - len(holidays)))
 
 
 # ---------------------------------------------------------------------------
