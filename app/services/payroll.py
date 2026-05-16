@@ -31,10 +31,12 @@ def _last_day_of_month(year: int, month: int) -> date:
 
 
 def _count_absent_days(
-    db: Session, employee_id: int, year: int, month: int
+    db: Session, employee_id: int, company_id: int | None,
+    year: int, month: int,
 ) -> int:
     """Return how many days in the (year, month) the employee was marked
-    `absent` in the attendance ledger.
+    `absent` in the attendance ledger, EXCLUDING days that are company
+    holidays.
 
     Other AttendanceStatus values — present / late / half_day / leave —
     all count as worked time:
@@ -47,25 +49,37 @@ def _count_absent_days(
                         pay"). Adding an unpaid leave_type later would
                         need its days counted here too.
 
-    Only `absent` is "loss of pay" today, so that's the single signal
-    we read.
+    Only `absent` is "loss of pay" today. And even an `absent` row on
+    a company-declared holiday isn't LWP — the employee shouldn't lose
+    pay for a holiday they couldn't attend on anyway.
+
+    `company_id=None` defends against the edge case where the employee
+    isn't bound to any company; in that case there's no holiday calendar
+    to consult so all absent rows count as LWP.
     """
+    # Import lazily so payroll.py doesn't pull crud/holiday at import.
+    from app.crud.holiday import holiday_dates_in_range
+
     _, last = monthrange(year, month)
     start_date = date(year, month, 1)
     end_date = date(year, month, last)
 
-    return int(
-        db.execute(
-            select(func.count(Attendance.id)).where(
-                Attendance.employee_id == employee_id,
-                Attendance.attendance_status == AttendanceStatus.absent,
-                Attendance.deleted_at.is_(None),
-                Attendance.date >= start_date,
-                Attendance.date <= end_date,
-            )
-        ).scalar()
-        or 0
+    stmt = select(func.count(Attendance.id)).where(
+        Attendance.employee_id == employee_id,
+        Attendance.attendance_status == AttendanceStatus.absent,
+        Attendance.deleted_at.is_(None),
+        Attendance.date >= start_date,
+        Attendance.date <= end_date,
     )
+
+    if company_id is not None:
+        holidays = holiday_dates_in_range(
+            db, company_id, start_date, end_date
+        )
+        if holidays:
+            stmt = stmt.where(Attendance.date.notin_(holidays))
+
+    return int(db.execute(stmt).scalar() or 0)
 
 
 def generate_payslip(
@@ -126,7 +140,20 @@ def generate_payslip(
     # amounts, not declared structure values. The structure values are
     # always retrievable via SalaryStructure history if needed.
     _, days_in_period = monthrange(year, month)
-    days_lwp = float(_count_absent_days(db, employee_id, year, month))
+
+    # Look up the employee for company_id so _count_absent_days can
+    # consult the holiday calendar. The structure is bound to this
+    # employee_id, so the row is guaranteed to exist.
+    employee = (
+        db.query(Employee)
+        .filter(Employee.id == employee_id, Employee.deleted_at.is_(None))
+        .first()
+    )
+    company_id = employee.company_id if employee else None
+
+    days_lwp = float(
+        _count_absent_days(db, employee_id, company_id, year, month)
+    )
     days_worked = max(0.0, days_in_period - days_lwp)
     factor = days_worked / days_in_period if days_in_period > 0 else 1.0
 
