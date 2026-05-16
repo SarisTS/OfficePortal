@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status,
+)
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
-from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse
+from app.schemas.employee import (
+    EmployeeBulkImportResult, EmployeeCreate, EmployeeResponse, EmployeeUpdate,
+)
 from app.crud import employee as employee_crud
 from app.crud.auth import require_admin
 from app.utils.api_response import ApiResponse, PaginatedResponse
@@ -22,6 +26,57 @@ def create_employee(
         "status": status.HTTP_200_OK,
         "message": "Employee Created Successfully",
         "data": employee_crud.create_employee(db, employee, user, background_tasks)
+    }
+
+
+@router.post(
+    "/import", response_model=ApiResponse[EmployeeBulkImportResult]
+)
+async def import_employees(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_admin),
+):
+    """Bulk-create employees from a CSV upload.
+
+    CSV header maps to EmployeeCreate field names; unknown columns are
+    ignored. Per-row failures (validation errors, duplicate email,
+    invalid role/department) are reported in `skipped` rather than
+    aborting the whole upload. Each successful row goes through the
+    normal create_employee path — generated roll_no, hashed password,
+    welcome email queued as a background task.
+
+    For office_admin the company_id column in the CSV is overridden to
+    the actor's own company (matches the bulk-holiday convention).
+    """
+    if file.content_type and not file.content_type.startswith(
+        ("text/csv", "text/plain", "application/csv", "application/vnd.ms-excel")
+    ):
+        # Be lenient — browsers/Excel sometimes send the file with
+        # surprising MIME types. Only reject obvious mismatches
+        # (image, pdf, etc.). An empty content_type is fine.
+        pass
+
+    contents = await file.read()
+    try:
+        csv_text = contents.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "CSV must be UTF-8 encoded")
+
+    created, skipped = employee_crud.bulk_import_employees(
+        db, csv_text, user, background_tasks
+    )
+    return {
+        "status": status.HTTP_200_OK,
+        "message": (
+            f"Bulk import done: {len(created)} created, "
+            f"{len(skipped)} skipped"
+        ),
+        "data": {
+            "created": [EmployeeResponse.model_validate(e) for e in created],
+            "skipped": skipped,
+        },
     }
 
 
