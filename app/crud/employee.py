@@ -416,3 +416,58 @@ def delete_employee(db: Session, employee_id: int, user):
         db.rollback()
         logger.exception("Error deleting employee")
         raise
+
+
+def update_own_profile(db: Session, user: Employee, data) -> Employee:
+    """Apply a self-service profile edit.
+
+    Only the fields whitelisted in app/schemas/employee.py::ProfileUpdate
+    can flow in (extra="forbid" rejects everything else with 422 at parse
+    time). On top of that, mobile + email get pre-validated against the
+    other-user uniqueness invariant so the response is a friendly 400
+    instead of a partial-unique-index violation bubbling from the DB.
+
+    Mobile is stripped of whitespace; email is lowercased + stripped to
+    match the convention used in the admin create/login paths.
+    """
+    update_data = data.model_dump(exclude_unset=True)
+    if not update_data:
+        return user
+
+    # Normalize + uniqueness-check mobile
+    if "mobile" in update_data and update_data["mobile"] is not None:
+        new_mobile = update_data["mobile"].strip()
+        update_data["mobile"] = new_mobile
+        if new_mobile and new_mobile != user.mobile:
+            conflict = db.query(Employee).filter(
+                Employee.mobile == new_mobile,
+                Employee.id != user.id,
+                Employee.deleted_at.is_(None),
+            ).first()
+            if conflict:
+                raise HTTPException(400, "Mobile number already in use")
+
+    # Normalize + uniqueness-check email
+    if "email" in update_data and update_data["email"] is not None:
+        new_email = update_data["email"].lower().strip()
+        update_data["email"] = new_email
+        if new_email and new_email != user.email:
+            conflict = db.query(Employee).filter(
+                Employee.email == new_email,
+                Employee.id != user.id,
+                Employee.deleted_at.is_(None),
+            ).first()
+            if conflict:
+                raise HTTPException(400, "Email already in use")
+
+    try:
+        for key, value in update_data.items():
+            setattr(user, key, value)
+        user.updated_by = user.id
+        db.commit()
+        db.refresh(user)
+        return user
+    except Exception:
+        db.rollback()
+        logger.exception("Error updating own profile")
+        raise
