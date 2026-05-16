@@ -13,6 +13,8 @@ class LeaveCreate(StrictRequestModel):
     start_date: date
     end_date: date
 
+    is_half_day: Optional[bool] = False
+
     reason: Optional[str] = None
     contact_number: Optional[str] = None
 
@@ -40,6 +42,8 @@ class LeaveResponse(BaseModel):
 
     start_date: date
     end_date: date
+
+    is_half_day: bool = False
 
     status: LeaveStatus
 

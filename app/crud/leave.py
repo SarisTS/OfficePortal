@@ -6,6 +6,9 @@ from app.models.employee import Employee, UserTypes
 from app.schemas.leave import LeaveCreate, LeaveUpdate, LeaveResponse
 from app.crud.attendance import apply_leave_to_attendance
 from app.crud.auth import is_global_admin
+from app.services.leave_balance import (
+    assert_can_debit, compute_leave_days, debit, get_or_init_balance, refund,
+)
 
 
 def _leave_with_employee(db: Session, leave_id: int):
@@ -61,6 +64,21 @@ def create_leave(db: Session, leave: LeaveCreate, user) -> LeaveResponse:
     if overlapping:
         raise HTTPException(400, "Overlapping leave exists")
 
+    # 💰 Balance gate — refuse before the row enters `pending`. Debit
+    # happens later on approval, not now; we only assert the employee
+    # COULD afford this if approved today. require_policy() inside
+    # get_or_init_balance raises 400 if the company has no policy.
+    is_half_day = bool(getattr(leave, "is_half_day", False))
+    days = compute_leave_days(leave.start_date, leave.end_date, is_half_day)
+    balance = get_or_init_balance(
+        db,
+        employee_id=employee.id,
+        company_id=employee.company_id,
+        year=leave.start_date.year,
+        leave_type=leave.leave_type,
+    )
+    assert_can_debit(balance, days)
+
     db_leave = Leave(**leave.model_dump())
     db_leave.created_by = user.id
 
@@ -86,12 +104,29 @@ def approve_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
     if leave.status != LeaveStatus.pending:
         raise HTTPException(400, "Already processed")
 
+    # 💰 Re-check + debit balance. Re-validating here (not just trusting
+    # the gate at create-time) handles the case where allocation was
+    # reduced between request and approval.
+    days = compute_leave_days(
+        leave.start_date, leave.end_date, bool(leave.is_half_day)
+    )
+    balance = get_or_init_balance(
+        db,
+        employee_id=leave.employee_id,
+        company_id=leave.employee.company_id,
+        year=leave.start_date.year,
+        leave_type=leave.leave_type,
+    )
+    assert_can_debit(balance, days)
+
     leave.status = LeaveStatus.approved
     leave.approved_by = admin.id
     leave.approved_at = datetime.now(timezone.utc)
 
-    # 🔗 Sync attendance
+    # 🔗 Sync attendance + debit balance in one atomic unit so an attendance
+    # failure rolls the balance back too.
     try:
+        debit(balance, days)
         apply_leave_to_attendance(db, leave)
         db.commit()
         db.refresh(leave)
@@ -99,7 +134,7 @@ def approve_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
     except Exception:
         db.rollback()
         raise
-    
+
 
 def reject_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
 
@@ -230,6 +265,22 @@ def update_leave(db: Session, leave_id: int, data: LeaveUpdate, user)-> LeaveRes
         if update_data["start_date"] > update_data["end_date"]:
             raise HTTPException(400, "Invalid date range")
 
+    # 💰 If the date range changed, re-validate against balance. We're
+    # still in pending state (enforced above), so no actual debit yet —
+    # this is just the same affordability gate as create_leave.
+    if "start_date" in update_data or "end_date" in update_data:
+        new_days = compute_leave_days(
+            new_start, new_end, bool(leave.is_half_day)
+        )
+        new_balance = get_or_init_balance(
+            db,
+            employee_id=leave.employee_id,
+            company_id=leave.employee.company_id,
+            year=new_start.year,
+            leave_type=leave.leave_type,
+        )
+        assert_can_debit(new_balance, new_days)
+
     for key, value in update_data.items():
         setattr(leave, key, value)
 
@@ -245,7 +296,7 @@ def delete_leave(db: Session, leave_id: int, user):
 
     if not leave:
         return None
-    
+
     if user.user_type in (UserTypes.staff, UserTypes.employee):
         if leave.employee_id != user.id:
             raise HTTPException(403, "Not allowed")
@@ -254,12 +305,28 @@ def delete_leave(db: Session, leave_id: int, user):
         if leave.employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
 
-    # ❌ Cannot delete approved leave
-    if leave.status == LeaveStatus.approved:
-        raise HTTPException(400, "Cannot delete approved leave")
+    # 💰 If the leave was approved, refund the balance before soft-deleting.
+    # Previously this path was blocked entirely with "Cannot delete approved
+    # leave"; the balance ledger gives us a clean way to cancel an approved
+    # leave without losing accounting. (Rejected leaves never debited.)
+    try:
+        if leave.status == LeaveStatus.approved:
+            days = compute_leave_days(
+                leave.start_date, leave.end_date, bool(leave.is_half_day)
+            )
+            balance = get_or_init_balance(
+                db,
+                employee_id=leave.employee_id,
+                company_id=leave.employee.company_id,
+                year=leave.start_date.year,
+                leave_type=leave.leave_type,
+            )
+            refund(balance, days)
 
-    leave.deleted_at = datetime.now(timezone.utc)
-
-    db.commit()
+        leave.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return leave
