@@ -41,7 +41,10 @@ jobs:
         run: cp .env.example .env
 
       - name: Run tests
-        run: pytest -q
+        # -v prints each test name as it runs (so the failing test is
+        # visible inline on the Actions page); --tb=short gives a one
+        # screen traceback per failure instead of the full pytest dump.
+        run: pytest -v --tb=short
 
   compose-smoke:
     name: docker compose smoke
