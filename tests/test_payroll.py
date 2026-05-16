@@ -408,6 +408,46 @@ def test_payslip_zero_pay_when_fully_absent(client, stack, db_session):
     assert p["net"] == -3700  # raw arithmetic, no policy clamp
 
 
+def test_payslip_excludes_holiday_from_lwp(client, stack, db_session):
+    """An `absent` row falling on a company holiday is NOT counted as
+    LWP — employee shouldn't lose pay for a holiday they couldn't
+    attend on anyway."""
+    from app.models.holiday import CompanyHoliday
+
+    fx = stack
+    admin_token = _admin_token(client)
+    _create_structure(client, admin_token, fx["employee"].id, date(2026, 1, 1))
+
+    # Seed 3 absent days: Feb 1, 2, 3
+    _seed_absent_days(
+        db_session, fx["employee"].id, fx["company_a"].id,
+        year=2026, month=2, count=3,
+    )
+    # Make Feb 2 a company holiday — that day's absent row should be
+    # ignored for LWP.
+    db_session.add(CompanyHoliday(
+        company_id=fx["company_a"].id,
+        date=date(2026, 2, 2),
+        name="Some Holiday",
+    ))
+    db_session.commit()
+
+    r = client.post(
+        f"/payslips/employee/{fx['employee'].id}/generate",
+        json={"year": 2026, "month": 2},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    p = r.json()["data"]
+
+    # 3 absent days minus 1 holiday → days_lwp = 2
+    assert p["days_lwp"] == 2
+    assert p["days_worked"] == 26
+    # factor = 26 / 28
+    assert p["gross"] == pytest.approx(50000 * (26 / 28))
+    assert p["net"] == pytest.approx(50000 * (26 / 28) - 3700)
+
+
 def test_payslip_unaffected_by_approved_leave(client, stack, db_session):
     """Days marked as AttendanceStatus.leave (approved paid leave) are
     NOT counted as LWP — they're worked-and-paid in the current schema

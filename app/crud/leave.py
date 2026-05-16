@@ -7,7 +7,7 @@ from app.schemas.leave import LeaveCreate, LeaveUpdate, LeaveResponse
 from app.crud.attendance import apply_leave_to_attendance
 from app.crud.auth import is_global_admin
 from app.services.leave_balance import (
-    assert_can_debit, compute_leave_days, debit, get_or_init_balance, refund,
+    assert_can_debit, billable_leave_days, debit, get_or_init_balance, refund,
 )
 
 
@@ -69,7 +69,10 @@ def create_leave(db: Session, leave: LeaveCreate, user) -> LeaveResponse:
     # COULD afford this if approved today. require_policy() inside
     # get_or_init_balance raises 400 if the company has no policy.
     is_half_day = bool(getattr(leave, "is_half_day", False))
-    days = compute_leave_days(leave.start_date, leave.end_date, is_half_day)
+    days = billable_leave_days(
+        db, employee.company_id,
+        leave.start_date, leave.end_date, is_half_day,
+    )
     balance = get_or_init_balance(
         db,
         employee_id=employee.id,
@@ -106,9 +109,11 @@ def approve_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
 
     # 💰 Re-check + debit balance. Re-validating here (not just trusting
     # the gate at create-time) handles the case where allocation was
-    # reduced between request and approval.
-    days = compute_leave_days(
-        leave.start_date, leave.end_date, bool(leave.is_half_day)
+    # reduced between request and approval — or holidays were added
+    # between the two events.
+    days = billable_leave_days(
+        db, leave.employee.company_id,
+        leave.start_date, leave.end_date, bool(leave.is_half_day),
     )
     balance = get_or_init_balance(
         db,
@@ -269,8 +274,9 @@ def update_leave(db: Session, leave_id: int, data: LeaveUpdate, user)-> LeaveRes
     # still in pending state (enforced above), so no actual debit yet —
     # this is just the same affordability gate as create_leave.
     if "start_date" in update_data or "end_date" in update_data:
-        new_days = compute_leave_days(
-            new_start, new_end, bool(leave.is_half_day)
+        new_days = billable_leave_days(
+            db, leave.employee.company_id,
+            new_start, new_end, bool(leave.is_half_day),
         )
         new_balance = get_or_init_balance(
             db,
@@ -309,10 +315,13 @@ def delete_leave(db: Session, leave_id: int, user):
     # Previously this path was blocked entirely with "Cannot delete approved
     # leave"; the balance ledger gives us a clean way to cancel an approved
     # leave without losing accounting. (Rejected leaves never debited.)
+    # Use billable_leave_days so the refund matches what was debited at
+    # approval time (holidays inside the range were never charged).
     try:
         if leave.status == LeaveStatus.approved:
-            days = compute_leave_days(
-                leave.start_date, leave.end_date, bool(leave.is_half_day)
+            days = billable_leave_days(
+                db, leave.employee.company_id,
+                leave.start_date, leave.end_date, bool(leave.is_half_day),
             )
             balance = get_or_init_balance(
                 db,
