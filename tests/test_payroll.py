@@ -280,6 +280,37 @@ def test_employee_self_read_returns_only_own_payslips(client, stack):
     assert items[0]["employee_id"] == fx["employee"].id
 
 
+def test_download_payslip_pdf(client, stack):
+    """GET /payslips/{id}/pdf returns a real PDF byte stream that the
+    caller can save. Self can download own; admin can too."""
+    fx = stack
+    admin_token = _admin_token(client)
+    _create_structure(client, admin_token, fx["employee"].id, date(2026, 1, 1))
+    r = client.post(
+        f"/payslips/employee/{fx['employee'].id}/generate",
+        json={"year": 2026, "month": 2},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    payslip_id = r.json()["data"]["id"]
+
+    # As the employee — self download
+    emp_token = _employee_token(client)
+    r = client.get(f"/payslips/{payslip_id}/pdf", headers=_auth(emp_token))
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF-"), "response isn't a PDF"
+    assert len(r.content) > 1000, "PDF suspiciously small"
+    # Content-Disposition advertises an inline filename
+    assert "payslip-2026-02.pdf" in r.headers["content-disposition"]
+
+
+def test_pdf_404_for_unknown_payslip(client, stack):
+    emp_token = _employee_token(client)
+    r = client.get("/payslips/99999/pdf", headers=_auth(emp_token))
+    assert r.status_code == 404
+
+
 def test_bulk_generate_for_company(client, stack):
     """Bulk path: every staff/employee in the company gets a payslip
     (or ends up in `skipped`). office_admin is correctly excluded from

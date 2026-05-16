@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.permissions import (
     assert_can_access_employee, is_super_admin,
 )
 from app.crud.auth import get_current_user, require_admin
 from app.database.database import get_db
+from app.models.employee import Employee
 from app.models.payslip import Payslip
 from app.schemas.payslip import PayslipGenerateRequest, PayslipResponse
 from app.services.payroll import generate_for_company, generate_payslip
 from app.utils.api_response import ApiResponse
+from app.utils.pdf_generator import render_payslip_pdf
 
 router = APIRouter(tags=["Payslips"])
 
@@ -167,3 +169,43 @@ def get_payslip(
         "message": "Payslip fetched",
         "data": payslip,
     }
+
+
+@router.get("/{payslip_id}/pdf")
+def download_payslip_pdf(
+    payslip_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return the payslip rendered as a PDF.
+
+    Same access control as GET /payslips/{id}: self if owner, admin if
+    scoped to the target's company. Employee is loaded with
+    joinedload(.company) so the PDF renderer doesn't trigger a lazy
+    SELECT during build time.
+    """
+    payslip = db.query(Payslip).filter(
+        Payslip.id == payslip_id,
+        Payslip.deleted_at.is_(None),
+    ).first()
+    if not payslip:
+        raise HTTPException(404, "Payslip not found")
+
+    assert_can_access_employee(db, payslip.employee_id, user)
+
+    employee = (
+        db.query(Employee)
+        .options(joinedload(Employee.company))
+        .filter(Employee.id == payslip.employee_id)
+        .first()
+    )
+
+    pdf_bytes = render_payslip_pdf(payslip, employee)
+    filename = f"payslip-{payslip.year}-{payslip.month:02d}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+        },
+    )
