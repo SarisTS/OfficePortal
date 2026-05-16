@@ -311,6 +311,141 @@ def test_pdf_404_for_unknown_payslip(client, stack):
     assert r.status_code == 404
 
 
+def _seed_absent_days(db_session, employee_id, company_id, year, month, count):
+    """Seed `count` Attendance rows starting at day 1 of the period
+    with attendance_status=absent. Used by the pro-rating tests."""
+    from app.models.attendance import Attendance, AttendanceStatus
+
+    rows = [
+        Attendance(
+            employee_id=employee_id,
+            company_id=company_id,
+            date=date(year, month, day),
+            attendance_status=AttendanceStatus.absent,
+            working_hours=0.0,
+        )
+        for day in range(1, count + 1)
+    ]
+    db_session.add_all(rows)
+    db_session.commit()
+
+
+def test_payslip_prorates_for_absent_days(client, stack, db_session):
+    """3 absent days in Feb 2026 (28 days):
+       factor = 25 / 28
+       gross  = 50000 × (25/28) ≈ 44642.857
+       net    = gross - deductions (3700) ≈ 40942.857
+       Component fields are pro-rated too — basic + hra + ... == gross.
+    """
+    fx = stack
+    admin_token = _admin_token(client)
+    _create_structure(client, admin_token, fx["employee"].id, date(2026, 1, 1))
+
+    _seed_absent_days(
+        db_session, fx["employee"].id, fx["company_a"].id,
+        year=2026, month=2, count=3,
+    )
+
+    r = client.post(
+        f"/payslips/employee/{fx['employee'].id}/generate",
+        json={"year": 2026, "month": 2},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    p = r.json()["data"]
+
+    assert p["days_in_period"] == 28
+    assert p["days_lwp"] == 3
+    assert p["days_worked"] == 25
+
+    # gross + each component scaled by 25/28
+    factor = 25 / 28
+    assert p["basic"] == pytest.approx(30000 * factor)
+    assert p["hra"] == pytest.approx(15000 * factor)
+    assert p["special_allowance"] == pytest.approx(5000 * factor)
+    assert p["other_allowances"] == 0
+    assert p["gross"] == pytest.approx(50000 * factor)
+
+    # Components sum to gross (the user-friendly invariant)
+    components_sum = (
+        p["basic"] + p["hra"] + p["special_allowance"] + p["other_allowances"]
+    )
+    assert components_sum == pytest.approx(p["gross"])
+
+    # Deductions are flat
+    assert p["total_deductions"] == 3700
+    assert p["net"] == pytest.approx(50000 * factor - 3700)
+
+
+def test_payslip_zero_pay_when_fully_absent(client, stack, db_session):
+    """Edge: 28 absent days in a 28-day month → factor = 0.
+       gross = 0; deductions are still 3700 (flat); net = -3700.
+       Today we DON'T clamp net at 0 — that decision lives in the
+       payroll-policy layer, not in raw arithmetic. Documenting via
+       this test."""
+    fx = stack
+    admin_token = _admin_token(client)
+    _create_structure(client, admin_token, fx["employee"].id, date(2026, 1, 1))
+
+    _seed_absent_days(
+        db_session, fx["employee"].id, fx["company_a"].id,
+        year=2026, month=2, count=28,
+    )
+
+    r = client.post(
+        f"/payslips/employee/{fx['employee'].id}/generate",
+        json={"year": 2026, "month": 2},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    p = r.json()["data"]
+
+    assert p["days_lwp"] == 28
+    assert p["days_worked"] == 0
+    assert p["gross"] == 0
+    assert p["basic"] == 0
+    assert p["total_deductions"] == 3700
+    assert p["net"] == -3700  # raw arithmetic, no policy clamp
+
+
+def test_payslip_unaffected_by_approved_leave(client, stack, db_session):
+    """Days marked as AttendanceStatus.leave (approved paid leave) are
+    NOT counted as LWP — they're worked-and-paid in the current schema
+    where every LeaveType is paid leave. Only `absent` counts."""
+    from app.models.attendance import Attendance, AttendanceStatus
+
+    fx = stack
+    admin_token = _admin_token(client)
+    _create_structure(client, admin_token, fx["employee"].id, date(2026, 1, 1))
+
+    # Seed 5 days as `leave` (paid leave). Should NOT pro-rate.
+    db_session.add_all([
+        Attendance(
+            employee_id=fx["employee"].id,
+            company_id=fx["company_a"].id,
+            date=date(2026, 2, day),
+            attendance_status=AttendanceStatus.leave,
+            working_hours=0.0,
+        )
+        for day in range(1, 6)
+    ])
+    db_session.commit()
+
+    r = client.post(
+        f"/payslips/employee/{fx['employee'].id}/generate",
+        json={"year": 2026, "month": 2},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    p = r.json()["data"]
+
+    # Full pay — leave days are paid time
+    assert p["days_lwp"] == 0
+    assert p["days_worked"] == 28
+    assert p["gross"] == 50000
+    assert p["net"] == 46300
+
+
 def test_bulk_generate_for_company(client, stack):
     """Bulk path: every staff/employee in the company gets a payslip
     (or ends up in `skipped`). office_admin is correctly excluded from

@@ -16,9 +16,11 @@ from calendar import monthrange
 from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.crud.salary_structure import get_current_structure
+from app.models.attendance import Attendance, AttendanceStatus
 from app.models.employee import Employee, UserTypes
 from app.models.payslip import Payslip
 
@@ -26,6 +28,44 @@ from app.models.payslip import Payslip
 def _last_day_of_month(year: int, month: int) -> date:
     _, days = monthrange(year, month)
     return date(year, month, days)
+
+
+def _count_absent_days(
+    db: Session, employee_id: int, year: int, month: int
+) -> int:
+    """Return how many days in the (year, month) the employee was marked
+    `absent` in the attendance ledger.
+
+    Other AttendanceStatus values — present / late / half_day / leave —
+    all count as worked time:
+
+      - present / late: clocked in
+      - half_day:       worked the half (first-cut simplification; a
+                        follow-up could count as 0.5 worked days)
+      - leave:          approved leave (currently casual/sick/earned
+                        are ALL paid leave types — none are "loss of
+                        pay"). Adding an unpaid leave_type later would
+                        need its days counted here too.
+
+    Only `absent` is "loss of pay" today, so that's the single signal
+    we read.
+    """
+    _, last = monthrange(year, month)
+    start_date = date(year, month, 1)
+    end_date = date(year, month, last)
+
+    return int(
+        db.execute(
+            select(func.count(Attendance.id)).where(
+                Attendance.employee_id == employee_id,
+                Attendance.attendance_status == AttendanceStatus.absent,
+                Attendance.deleted_at.is_(None),
+                Attendance.date >= start_date,
+                Attendance.date <= end_date,
+            )
+        ).scalar()
+        or 0
+    )
 
 
 def generate_payslip(
@@ -70,12 +110,32 @@ def generate_payslip(
             f"{as_of.isoformat()}. Create one first."
         )
 
-    gross = (
-        structure.basic
-        + structure.hra
-        + structure.special_allowance
-        + structure.other_allowances
-    )
+    # ---- Attendance pro-rating ------------------------------------
+    #
+    # days_in_period  : calendar days in the month (28..31)
+    # days_lwp        : days marked `absent` in attendance ledger
+    # days_worked     : days_in_period - days_lwp (clamped to >= 0)
+    # factor          : days_worked / days_in_period
+    #
+    # Earnings get pro-rated by `factor`. Deductions stay flat — PF /
+    # professional tax / TDS / other deductions are computed off the
+    # declared structure, not off pro-rated pay (matches typical
+    # Indian payroll convention).
+    #
+    # The component fields stored on the Payslip reflect ACTUAL paid
+    # amounts, not declared structure values. The structure values are
+    # always retrievable via SalaryStructure history if needed.
+    _, days_in_period = monthrange(year, month)
+    days_lwp = float(_count_absent_days(db, employee_id, year, month))
+    days_worked = max(0.0, days_in_period - days_lwp)
+    factor = days_worked / days_in_period if days_in_period > 0 else 1.0
+
+    basic_paid = structure.basic * factor
+    hra_paid = structure.hra * factor
+    special_paid = structure.special_allowance * factor
+    other_paid = structure.other_allowances * factor
+
+    gross = basic_paid + hra_paid + special_paid + other_paid
     total_deductions = (
         structure.pf
         + structure.professional_tax
@@ -84,18 +144,16 @@ def generate_payslip(
     )
     net = gross - total_deductions
 
-    _, days_in_period = monthrange(year, month)
-
     payslip = Payslip(
         employee_id=employee_id,
         year=year,
         month=month,
-        # Snapshotted earnings
-        basic=structure.basic,
-        hra=structure.hra,
-        special_allowance=structure.special_allowance,
-        other_allowances=structure.other_allowances,
-        # Snapshotted deductions
+        # Pro-rated earnings (declared × factor)
+        basic=basic_paid,
+        hra=hra_paid,
+        special_allowance=special_paid,
+        other_allowances=other_paid,
+        # Snapshotted deductions (flat)
         pf=structure.pf,
         professional_tax=structure.professional_tax,
         tds=structure.tds,
@@ -104,10 +162,10 @@ def generate_payslip(
         gross=gross,
         total_deductions=total_deductions,
         net=net,
-        # Informational attendance (no pro-rating yet)
+        # Actual attendance numbers
         days_in_period=days_in_period,
-        days_worked=float(days_in_period),
-        days_lwp=0.0,
+        days_worked=days_worked,
+        days_lwp=days_lwp,
         generated_at=datetime.now(timezone.utc),
         created_by=actor.id,
     )
