@@ -67,3 +67,28 @@ class CompanyHolidayBulkResult(BaseModel):
     """Response shape for POST /company-holidays/bulk."""
     created: list[CompanyHolidayResponse]
     skipped: list[dict]  # [{"date": "...", "reason": "..."}]
+
+
+# ---------- Weekly Off ----------
+
+class CompanyWeeklyOffCreate(StrictRequestModel):
+    """Mark a weekday as non-working for the company.
+
+    day_of_week follows Python's date.weekday(): 0=Monday, 6=Sunday.
+    """
+    company_id: int
+    day_of_week: int
+
+    @field_validator("day_of_week")
+    def day_in_range(cls, v: int) -> int:
+        if not 0 <= v <= 6:
+            raise ValueError("day_of_week must be in 0..6 (0=Monday, 6=Sunday)")
+        return v
+
+
+class CompanyWeeklyOffResponse(BaseModel):
+    id: int
+    company_id: int
+    day_of_week: int
+
+    model_config = ConfigDict(from_attributes=True)

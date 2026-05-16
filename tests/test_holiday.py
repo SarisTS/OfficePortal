@@ -307,6 +307,116 @@ def test_update_holiday(client, stack, db_session):
     assert r.json()["data"]["name"] == "Republic Day (national holiday)"
 
 
+def test_create_weekly_off_for_sunday(client, stack):
+    fx = stack
+    token = _login(client, ADMIN_EMAIL)
+
+    r = client.post(
+        "/company-weekly-offs/",
+        json={"company_id": fx["company_a"].id, "day_of_week": 6},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["day_of_week"] == 6
+    assert data["company_id"] == fx["company_a"].id
+
+
+def test_create_weekly_off_out_of_range_returns_422(client, stack):
+    fx = stack
+    token = _login(client, ADMIN_EMAIL)
+
+    r = client.post(
+        "/company-weekly-offs/",
+        json={"company_id": fx["company_a"].id, "day_of_week": 7},
+        headers=_auth(token),
+    )
+    assert r.status_code == 422
+
+
+def test_duplicate_weekly_off_refused(client, stack):
+    fx = stack
+    token = _login(client, ADMIN_EMAIL)
+
+    body = {"company_id": fx["company_a"].id, "day_of_week": 0}
+    r1 = client.post("/company-weekly-offs/", json=body, headers=_auth(token))
+    assert r1.status_code == 200, r1.text
+
+    r2 = client.post("/company-weekly-offs/", json=body, headers=_auth(token))
+    assert r2.status_code == 400
+
+
+def test_office_admin_cannot_create_weekly_off_for_other_company(client, stack):
+    fx = stack
+    token = _login(client, ADMIN_EMAIL)
+
+    r = client.post(
+        "/company-weekly-offs/",
+        json={"company_id": fx["company_b"].id, "day_of_week": 6},
+        headers=_auth(token),
+    )
+    assert r.status_code == 403
+
+
+def test_employee_can_list_own_weekly_offs(client, stack, db_session):
+    """The /me endpoint scopes to the caller's own company."""
+    from app.models.holiday import CompanyWeeklyOff
+
+    fx = stack
+    db_session.add(CompanyWeeklyOff(
+        company_id=fx["company_a"].id, day_of_week=6,
+    ))
+    db_session.add(CompanyWeeklyOff(
+        company_id=fx["company_b"].id, day_of_week=5,  # other co
+    ))
+    db_session.commit()
+
+    token = _employee_login(client)
+    r = client.get("/me/weekly-offs", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    items = r.json()["data"]
+    assert len(items) == 1
+    assert items[0]["day_of_week"] == 6
+
+
+def test_non_working_dates_in_range_unions_both(db_session, stack):
+    """Unit test on the helper directly: explicit holidays + expanded
+    weekly-offs should produce a unioned set."""
+    from datetime import date as _date
+    from app.crud.holiday import non_working_dates_in_range
+    from app.models.holiday import CompanyHoliday, CompanyWeeklyOff
+
+    fx = stack
+    # Explicit holiday: Mar 8 (a Sunday-adjacent weekday)
+    db_session.add(CompanyHoliday(
+        company_id=fx["company_a"].id, date=_date(2026, 3, 8),
+        name="Some Holiday",
+    ))
+    # Weekly off: Sunday (day 6)
+    db_session.add(CompanyWeeklyOff(
+        company_id=fx["company_a"].id, day_of_week=6,
+    ))
+    db_session.commit()
+
+    # Mar 1-31, 2026. Sundays in that range: 1, 8, 15, 22, 29.
+    # Mar 8 happens to be Sunday + the explicit holiday — that's fine,
+    # set union de-dupes.
+    result = non_working_dates_in_range(
+        db_session, fx["company_a"].id, _date(2026, 3, 1), _date(2026, 3, 31)
+    )
+    # 5 Sundays + Mar 8 (already in Sundays) = 5 distinct dates
+    assert _date(2026, 3, 1) in result
+    assert _date(2026, 3, 8) in result
+    assert _date(2026, 3, 15) in result
+    assert _date(2026, 3, 22) in result
+    assert _date(2026, 3, 29) in result
+    assert len(result) == 5
+
+    # Non-Sundays that aren't holidays should NOT be in the set
+    assert _date(2026, 3, 2) not in result
+    assert _date(2026, 3, 10) not in result
+
+
 def test_delete_holiday(client, stack, db_session):
     fx = stack
     h = CompanyHoliday(

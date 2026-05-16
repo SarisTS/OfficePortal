@@ -58,7 +58,10 @@ def _count_absent_days(
     to consult so all absent rows count as LWP.
     """
     # Import lazily so payroll.py doesn't pull crud/holiday at import.
-    from app.crud.holiday import holiday_dates_in_range
+    # non_working_dates_in_range unions explicit holidays + weekly-off
+    # pattern, so absence on a Sunday (when the company declares Sunday
+    # as a weekly off) doesn't reduce pay.
+    from app.crud.holiday import non_working_dates_in_range
 
     _, last = monthrange(year, month)
     start_date = date(year, month, 1)
@@ -73,11 +76,11 @@ def _count_absent_days(
     )
 
     if company_id is not None:
-        holidays = holiday_dates_in_range(
+        non_working = non_working_dates_in_range(
             db, company_id, start_date, end_date
         )
-        if holidays:
-            stmt = stmt.where(Attendance.date.notin_(holidays))
+        if non_working:
+            stmt = stmt.where(Attendance.date.notin_(non_working))
 
     return int(db.execute(stmt).scalar() or 0)
 

@@ -448,6 +448,55 @@ def test_payslip_excludes_holiday_from_lwp(client, stack, db_session):
     assert p["net"] == pytest.approx(50000 * (26 / 28) - 3700)
 
 
+def test_payslip_excludes_weekly_off_from_lwp(client, stack, db_session):
+    """An absent row on a date that's a weekly-off day doesn't count
+    as LWP — same treatment as an explicit holiday."""
+    from app.models.attendance import Attendance, AttendanceStatus
+    from app.models.holiday import CompanyWeeklyOff
+
+    fx = stack
+    admin_token = _admin_token(client)
+    _create_structure(client, admin_token, fx["employee"].id, date(2026, 1, 1))
+
+    # Sunday off (Python weekday=6).
+    db_session.add(CompanyWeeklyOff(
+        company_id=fx["company_a"].id, day_of_week=6,
+    ))
+    db_session.commit()
+
+    # Mark Feb 1 (Sunday) and Feb 2 (Monday) as absent.
+    db_session.add_all([
+        Attendance(
+            employee_id=fx["employee"].id,
+            company_id=fx["company_a"].id,
+            date=date(2026, 2, 1),  # Sunday
+            attendance_status=AttendanceStatus.absent,
+            working_hours=0,
+        ),
+        Attendance(
+            employee_id=fx["employee"].id,
+            company_id=fx["company_a"].id,
+            date=date(2026, 2, 2),  # Monday
+            attendance_status=AttendanceStatus.absent,
+            working_hours=0,
+        ),
+    ])
+    db_session.commit()
+
+    r = client.post(
+        f"/payslips/employee/{fx['employee'].id}/generate",
+        json={"year": 2026, "month": 2},
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    p = r.json()["data"]
+
+    # Sunday (Feb 1) excluded; Monday (Feb 2) counted → 1 LWP day
+    assert p["days_lwp"] == 1
+    assert p["days_worked"] == 27   # 28 - 1
+    assert p["gross"] == pytest.approx(50000 * (27 / 28))
+
+
 def test_payslip_unaffected_by_approved_leave(client, stack, db_session):
     """Days marked as AttendanceStatus.leave (approved paid leave) are
     NOT counted as LWP — they're worked-and-paid in the current schema

@@ -14,9 +14,11 @@ from app.crud.employee import update_own_profile
 from app.crud.salary_structure import get_current_structure
 from app.database.database import get_db
 from app.models.employee import Employee
-from app.models.holiday import CompanyHoliday
+from app.models.holiday import CompanyHoliday, CompanyWeeklyOff
 from app.schemas.employee import EmployeeResponse, ProfileUpdate
-from app.schemas.holiday import CompanyHolidayResponse
+from app.schemas.holiday import (
+    CompanyHolidayResponse, CompanyWeeklyOffResponse,
+)
 from app.schemas.payslip import SalaryStructureResponse
 from app.utils.api_response import ApiResponse
 
@@ -99,6 +101,38 @@ def list_my_holidays(
     return {
         "status": status.HTTP_200_OK,
         "message": "Holidays fetched",
+        "data": items,
+    }
+
+
+@router.get(
+    "/weekly-offs",
+    response_model=ApiResponse[list[CompanyWeeklyOffResponse]],
+)
+def list_my_weekly_offs(
+    db: Session = Depends(get_db),
+    user: Employee = Depends(get_current_user),
+):
+    """Self-service list of recurring weekly-off days for the caller's
+    company. Empty list when the caller has no company on file."""
+    if user.company_id is None:
+        return {
+            "status": status.HTTP_200_OK,
+            "message": "No company on file; no weekly offs to list",
+            "data": [],
+        }
+    items = (
+        db.query(CompanyWeeklyOff)
+        .filter(
+            CompanyWeeklyOff.company_id == user.company_id,
+            CompanyWeeklyOff.deleted_at.is_(None),
+        )
+        .order_by(CompanyWeeklyOff.day_of_week)
+        .all()
+    )
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Weekly offs fetched",
         "data": items,
     }
 

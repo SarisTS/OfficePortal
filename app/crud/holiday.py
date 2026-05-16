@@ -1,14 +1,14 @@
-"""Admin CRUD for CompanyHoliday + a read-side helper used by leave +
-payroll integrations in the next two commits.
+"""Admin CRUD for CompanyHoliday + CompanyWeeklyOff, plus a read-side
+helper (non_working_dates_in_range) used by leave + payroll services.
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.permissions import is_super_admin, same_company
 from app.database.database import with_transaction
-from app.models.holiday import CompanyHoliday
+from app.models.holiday import CompanyHoliday, CompanyWeeklyOff
 
 
 def _assert_can_touch(actor, company_id: int) -> None:
@@ -220,8 +220,8 @@ def delete_holiday(
 def holiday_dates_in_range(
     db: Session, company_id: int, start: date, end: date
 ) -> set[date]:
-    """Return the set of holiday dates between [start, end] (inclusive)
-    for a company. Used by leave-day counting and payroll LWP exclusion.
+    """Explicit (date-based) holidays only — does NOT include weekly
+    off patterns. For the union of both, use non_working_dates_in_range.
 
     Returning a set (not a list) so callers can do O(1) `date in set`
     checks per row they're inspecting.
@@ -237,3 +237,135 @@ def holiday_dates_in_range(
         .all()
     )
     return {r.date for r in rows}
+
+
+def _company_weekly_off_days(db: Session, company_id: int) -> set[int]:
+    """Set of weekday numbers (0=Mon..6=Sun) that are non-working for
+    the company. Empty set when the company has no weekly-off rows."""
+    rows = (
+        db.query(CompanyWeeklyOff.day_of_week)
+        .filter(
+            CompanyWeeklyOff.company_id == company_id,
+            CompanyWeeklyOff.deleted_at.is_(None),
+        )
+        .all()
+    )
+    return {r.day_of_week for r in rows}
+
+
+def non_working_dates_in_range(
+    db: Session, company_id: int, start: date, end: date
+) -> set[date]:
+    """Union of explicit holidays + expanded weekly-off days for the
+    company in [start, end] (inclusive).
+
+    The weekly-off pattern is expanded by walking the date range one
+    day at a time and adding any whose weekday() is in the company's
+    weekly-off set. O(range_length) — bounded by month/quarter
+    boundaries in practice (called for leave + per-month payroll).
+
+    This is what leave-day counting and payroll LWP exclusion should
+    consult — see app/services/leave_balance.py:billable_leave_days
+    and app/services/payroll.py:_count_absent_days.
+    """
+    explicit = holiday_dates_in_range(db, company_id, start, end)
+    weekly = _company_weekly_off_days(db, company_id)
+    if not weekly:
+        return explicit
+
+    expanded: set[date] = set()
+    cur = start
+    while cur <= end:
+        if cur.weekday() in weekly:
+            expanded.add(cur)
+        cur += timedelta(days=1)
+
+    return explicit | expanded
+
+
+# ---------------------------------------------------------------------------
+# Weekly-off CRUD
+# ---------------------------------------------------------------------------
+
+def _resolve_weekly_off_company(actor, payload_company_id: int) -> int:
+    """Same scope rule as create_holiday: office_admin force-stamped
+    to their own company; super_admin can target any."""
+    if is_super_admin(actor):
+        return payload_company_id
+    if payload_company_id != actor.company_id:
+        raise HTTPException(
+            403, "Cannot create a weekly-off in another company"
+        )
+    return actor.company_id
+
+
+def create_weekly_off(db: Session, data, actor) -> CompanyWeeklyOff:
+    company_id = _resolve_weekly_off_company(actor, data.company_id)
+
+    existing = (
+        db.query(CompanyWeeklyOff)
+        .filter(
+            CompanyWeeklyOff.company_id == company_id,
+            CompanyWeeklyOff.day_of_week == data.day_of_week,
+            CompanyWeeklyOff.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            400,
+            f"Weekly off for day_of_week={data.day_of_week} already exists "
+            f"in this company."
+        )
+
+    row = CompanyWeeklyOff(
+        company_id=company_id,
+        day_of_week=data.day_of_week,
+        created_by=actor.id,
+    )
+    with with_transaction(db):
+        db.add(row)
+    db.refresh(row)
+    return row
+
+
+def list_weekly_offs(db: Session, actor, company_id: int | None = None):
+    """Admin list. office_admin sees their own; super_admin must pass
+    company_id (consistent with the holiday list rule)."""
+    if is_super_admin(actor):
+        if company_id is None:
+            raise HTTPException(
+                400, "super_admin must pass company_id to list weekly offs"
+            )
+    else:
+        company_id = actor.company_id
+
+    return (
+        db.query(CompanyWeeklyOff)
+        .filter(
+            CompanyWeeklyOff.company_id == company_id,
+            CompanyWeeklyOff.deleted_at.is_(None),
+        )
+        .order_by(CompanyWeeklyOff.day_of_week)
+        .all()
+    )
+
+
+def delete_weekly_off(db: Session, weekly_off_id: int, actor) -> CompanyWeeklyOff:
+    row = (
+        db.query(CompanyWeeklyOff)
+        .filter(
+            CompanyWeeklyOff.id == weekly_off_id,
+            CompanyWeeklyOff.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(404, "Weekly off not found")
+    if not same_company(actor, row.company_id):
+        raise HTTPException(403, "Not allowed")
+
+    with with_transaction(db):
+        row.deleted_at = datetime.now(timezone.utc)
+        row.updated_by = actor.id
+    return row
