@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import (
+    APIRouter, Depends, File, HTTPException, Query, UploadFile, status,
+)
 from sqlalchemy.orm import Session
 
 from app.crud import salary_structure as crud
 from app.crud.auth import require_admin
 from app.database.database import get_db
 from app.schemas.payslip import (
-    SalaryStructureCreate, SalaryStructureResponse, SalaryStructureUpdate,
+    SalaryStructureBulkImportResult, SalaryStructureCreate,
+    SalaryStructureResponse, SalaryStructureUpdate,
 )
 from app.utils.api_response import ApiResponse, PaginatedResponse
 
@@ -22,6 +25,48 @@ def create_structure(
         "status": status.HTTP_200_OK,
         "message": "Salary structure created",
         "data": crud.create_structure(db, data, user),
+    }
+
+
+@router.post(
+    "/import",
+    response_model=ApiResponse[SalaryStructureBulkImportResult],
+)
+async def import_structures(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_admin),
+):
+    """Bulk-create salary structures from a CSV upload.
+
+    CSV header maps to SalaryStructureCreate field names; unknown
+    columns are ignored. Per-row failures (validation errors,
+    cross-company forbidden, duplicate (employee_id, effective_from))
+    are reported in `skipped` rather than aborting the whole upload.
+
+    Tenant scoping is enforced inside create_structure — office_admin
+    importing for an employee in another company gets a per-row 403
+    captured in `skipped` (no separate guard needed in the router).
+    """
+    contents = await file.read()
+    try:
+        csv_text = contents.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "CSV must be UTF-8 encoded")
+
+    created, skipped = crud.bulk_import_structures(db, csv_text, user)
+    return {
+        "status": status.HTTP_200_OK,
+        "message": (
+            f"Bulk import done: {len(created)} created, "
+            f"{len(skipped)} skipped"
+        ),
+        "data": {
+            "created": [
+                SalaryStructureResponse.model_validate(s) for s in created
+            ],
+            "skipped": skipped,
+        },
     }
 
 

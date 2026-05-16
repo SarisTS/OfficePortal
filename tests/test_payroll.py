@@ -486,6 +486,117 @@ def test_payslip_unaffected_by_approved_leave(client, stack, db_session):
     assert p["net"] == 46300
 
 
+def _upload_structures(client, token, csv_text):
+    return client.post(
+        "/salary-structures/import",
+        files={"file": ("structures.csv", csv_text.encode("utf-8"), "text/csv")},
+        headers=_auth(token),
+    )
+
+
+def test_bulk_import_salary_structures(client, stack):
+    """Happy path: two structures for two employees in the same
+    company. Both created."""
+    fx = stack
+
+    # Need a second staff/employee in company_a so we have two rows
+    from app.models.role import Role
+    from app.models.employee import Employee, UserTypes
+
+    # Reuse the role from the fixture's first employee
+    role = fx["employee"].role_id
+
+    admin_token = _admin_token(client)
+
+    # Make a second employee via the API (uses the same admin)
+    r = client.post(
+        "/employees/",
+        json={
+            "name": "Second Emp",
+            "email": "second@example.com",
+            "company_id": fx["company_a"].id,
+            "role_id": role,
+            "user_type": "employee",
+        },
+        headers=_auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    second_id = r.json()["data"]["id"]
+
+    csv_text = (
+        "employee_id,effective_from,basic,hra\n"
+        f"{fx['employee'].id},2026-01-01,30000,15000\n"
+        f"{second_id},2026-01-01,25000,12000\n"
+    )
+    r = _upload_structures(client, admin_token, csv_text)
+    assert r.status_code == 200, r.text
+    body = r.json()["data"]
+    assert len(body["created"]) == 2
+    assert body["skipped"] == []
+
+
+def test_bulk_import_skips_cross_company_rows(client, stack):
+    """office_admin trying to import a structure for an employee in
+    another company gets that row skipped with a 403 detail."""
+    fx = stack
+    admin_token = _admin_token(client)
+
+    csv_text = (
+        "employee_id,effective_from,basic\n"
+        # Own company row — should succeed
+        f"{fx['employee'].id},2026-01-01,30000\n"
+        # Other company's employee — should skip with 403
+        f"{fx['other_co_emp'].id},2026-01-01,30000\n"
+    )
+    r = _upload_structures(client, admin_token, csv_text)
+    assert r.status_code == 200, r.text
+    body = r.json()["data"]
+    assert len(body["created"]) == 1
+    assert len(body["skipped"]) == 1
+    # Row 3 of the spreadsheet (1=header, 2=own emp, 3=other co)
+    assert body["skipped"][0]["row_number"] == 3
+
+
+def test_bulk_import_skips_duplicates(client, stack):
+    """Two rows with the same (employee, effective_from) → second is
+    skipped with the existing 'already exists' message."""
+    fx = stack
+    admin_token = _admin_token(client)
+
+    csv_text = (
+        "employee_id,effective_from,basic\n"
+        f"{fx['employee'].id},2026-01-01,30000\n"
+        f"{fx['employee'].id},2026-01-01,99999\n"  # dup
+    )
+    r = _upload_structures(client, admin_token, csv_text)
+    assert r.status_code == 200, r.text
+    body = r.json()["data"]
+    assert len(body["created"]) == 1
+    assert len(body["skipped"]) == 1
+    assert body["skipped"][0]["row_number"] == 3
+    assert "already exists" in body["skipped"][0]["errors"][0]["detail"].lower()
+
+
+def test_bulk_import_validation_errors(client, stack):
+    """Negative `basic` is refused by the schema validator and lands
+    in `skipped` with structured Pydantic errors."""
+    fx = stack
+    admin_token = _admin_token(client)
+
+    csv_text = (
+        "employee_id,effective_from,basic\n"
+        f"{fx['employee'].id},2026-01-01,-1000\n"  # negative
+    )
+    r = _upload_structures(client, admin_token, csv_text)
+    assert r.status_code == 200, r.text
+    body = r.json()["data"]
+    assert body["created"] == []
+    assert len(body["skipped"]) == 1
+    # Pydantic ValidationError structure: list of dicts with `loc`
+    errs = body["skipped"][0]["errors"]
+    assert any("basic" in str(e.get("loc", [])) for e in errs)
+
+
 def test_bulk_generate_for_company(client, stack):
     """Bulk path: every staff/employee in the company gets a payslip
     (or ends up in `skipped`). office_admin is correctly excluded from

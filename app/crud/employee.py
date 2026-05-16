@@ -472,7 +472,11 @@ def bulk_import_employees(
         except ValidationError as exc:
             skipped.append({
                 "row_number": row_idx,
-                "errors": exc.errors(),
+                # include_context=False drops the `ctx` field which can
+                # carry raw exception objects (ValueError from field
+                # validators) that Pydantic's JSON serializer can't
+                # encode through the response model.
+                "errors": exc.errors(include_context=False),
             })
             continue
 
