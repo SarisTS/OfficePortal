@@ -246,6 +246,112 @@ def test_office_admin_company_id_param_is_ignored(client, stack, db_session):
     assert other_emp.id not in employee_ids
 
 
+def test_leave_usage_aggregates_balances_and_pending(client, stack, db_session):
+    """LeavePolicy + LeaveBalance(used=3) + one pending Leave should
+    aggregate to allocated=12, used=3, remaining=9, pending=1."""
+    from app.models.leave import (
+        Leave, LeaveBalance, LeavePolicy, LeaveStatus, LeaveType,
+    )
+
+    fx = stack
+    db_session.add(LeavePolicy(
+        company_id=fx["company"].id,
+        leave_type=LeaveType.casual,
+        annual_entitlement=12.0,
+    ))
+    db_session.add(LeaveBalance(
+        employee_id=fx["employee"].id,
+        year=2026,
+        leave_type=LeaveType.casual,
+        allocated=12.0,
+        used=3.0,
+    ))
+    db_session.add(Leave(
+        employee_id=fx["employee"].id,
+        leave_type=LeaveType.casual,
+        start_date=date(2026, 3, 1),
+        end_date=date(2026, 3, 2),
+        status=LeaveStatus.pending,
+    ))
+    db_session.commit()
+
+    token = _login(client, ADMIN_EMAIL)
+    r = client.get(
+        "/reports/leave/usage?year=2026", headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    rows = r.json()["data"]
+    casual = next(x for x in rows if x["leave_type"] == "casual")
+    assert casual["total_allocated"] == 12.0
+    assert casual["total_used"] == 3.0
+    assert casual["total_remaining"] == 9.0
+    assert casual["pending_requests"] == 1
+
+
+def test_payroll_monthly_totals(client, stack, db_session):
+    """Seed two payslips with known totals; the report sums them."""
+    from datetime import datetime, timezone
+
+    from app.models.payslip import Payslip
+
+    fx = stack
+
+    db_session.add_all([
+        Payslip(
+            employee_id=fx["employee"].id,
+            year=2026, month=2,
+            basic=30000, hra=15000, special_allowance=5000, other_allowances=0,
+            pf=2000, professional_tax=200, tds=1500, other_deductions=0,
+            gross=50000, total_deductions=3700, net=46300,
+            days_in_period=28, days_worked=28, days_lwp=0,
+            generated_at=datetime.now(timezone.utc),
+        ),
+        # A second payslip for the same employee, different period — must
+        # NOT count toward Feb's totals.
+        Payslip(
+            employee_id=fx["employee"].id,
+            year=2026, month=3,
+            basic=30000, hra=15000, special_allowance=5000, other_allowances=0,
+            pf=2000, professional_tax=200, tds=1500, other_deductions=0,
+            gross=50000, total_deductions=3700, net=46300,
+            days_in_period=31, days_worked=31, days_lwp=0,
+            generated_at=datetime.now(timezone.utc),
+        ),
+    ])
+    db_session.commit()
+
+    token = _login(client, ADMIN_EMAIL)
+    r = client.get(
+        "/reports/payroll/monthly?year=2026&month=2", headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["company_id"] == fx["company"].id
+    assert d["year"] == 2026
+    assert d["month"] == 2
+    assert d["payslip_count"] == 1   # Mar payslip excluded
+    assert d["total_gross"] == 50000
+    assert d["total_deductions"] == 3700
+    assert d["total_net"] == 46300
+    assert d["average_net"] == 46300
+
+
+def test_payroll_empty_period_returns_zeros(client, stack):
+    """Period with no payslips → zeros, not 404, and no division by
+    zero in average_net."""
+    token = _login(client, ADMIN_EMAIL)
+    r = client.get(
+        "/reports/payroll/monthly?year=2030&month=1", headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["payslip_count"] == 0
+    assert d["total_gross"] == 0
+    assert d["total_deductions"] == 0
+    assert d["total_net"] == 0
+    assert d["average_net"] == 0   # not NaN
+
+
 def test_soft_deleted_attendance_is_excluded(client, stack, db_session):
     """Soft-deleted attendance rows must not count in the aggregation."""
     fx = stack
