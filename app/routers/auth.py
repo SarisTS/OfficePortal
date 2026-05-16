@@ -1,6 +1,6 @@
 import hmac
 import random
-from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Request, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.logger import get_logger
 
@@ -9,10 +9,11 @@ from app.core.oauth import oauth
 from app.core.security import create_access_token
 from app.database.database import get_db
 from app.schemas.auth import *
-from app.schemas.employee import EmployeeResponse
+from app.schemas.employee import EmployeeCreate, EmployeeResponse
 from app.models.employee import Employee, UserTypes
 from app.utils.hash import hash_password, verify_password
-from app.crud.auth import get_current_user
+from app.crud import employee as employee_crud
+from app.crud.auth import get_current_user, require_admin, is_global_admin
 from app.core.redis import redis_client
 from app.utils.api_response import ApiResponse
 
@@ -25,75 +26,76 @@ router = APIRouter(tags=["Auth"])
 #                            ADMIN AUTHENTICATION
 # ===================================================================================
 # Register
-@router.post("/employees", response_model=ApiResponse)
+#
+# DEPRECATED in Phase 1 stabilization (2026-05-16). The canonical path is
+# `POST /employees/`, which:
+#   - enforces tenant scoping (office_admin can only create in their own
+#     company — this endpoint previously trusted request.company_id without
+#     checking the actor's tenant, allowing cross-company creation)
+#   - generates roll_no via the central sequence (no admin-supplied roll_no)
+#   - hashes a generated password + queues the welcome email
+#   - writes an audit log entry
+#   - validates role + department belong to the same company
+#
+# This endpoint is kept callable for backward compatibility but now forwards
+# to crud.employee.create_employee with the same safety net. The handler-side
+# logic that bypassed all of the above is gone.
+@router.post("/employees", response_model=ApiResponse, deprecated=True)
 def create_employee(
     request: CreateEmployeeSchema,
-    current_user: Employee = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    current_user: Employee = Depends(require_admin),
+    db: Session = Depends(get_db),
 ):
-    # 🔐 Permission check
-    if current_user.user_type == UserTypes.super_admin:
+    # Permission: super_admin can create any role; office_admin can only
+    # create staff/employees (never admins).
+    if is_global_admin(current_user):
         allowed = [UserTypes.office_admin, UserTypes.staff, UserTypes.employee]
-
-    elif current_user.user_type == UserTypes.office_admin:
-        allowed = [UserTypes.staff, UserTypes.employee]
-
     else:
-        raise HTTPException(403, "Not allowed")
+        allowed = [UserTypes.staff, UserTypes.employee]
 
     if request.user_type not in allowed:
         raise HTTPException(403, "Cannot create this user type")
 
-    # 🔐 Validation based on user_type
-    if request.user_type in [UserTypes.super_admin, UserTypes.office_admin]:
-        if not request.email or not request.password:
-            raise HTTPException(400, "Email & password required")
+    # Tenant force-stamp: office_admin gets pinned to their own company
+    # regardless of what request.company_id says. super_admin must supply
+    # one (these are staff/employee/office_admin rows that need a company).
+    if is_global_admin(current_user):
+        company_id = request.company_id
+        if not company_id:
+            raise HTTPException(400, "company_id required")
+    else:
+        company_id = current_user.company_id
 
-    if request.user_type in [UserTypes.staff, UserTypes.employee]:
-        if not request.mobile:
-            raise HTTPException(400, "Mobile required")
-        if not request.company_id:
-            raise HTTPException(400, "Company required")
+    if not request.email:
+        raise HTTPException(400, "Email required")
 
-    # 🔒 Unique checks
-    if request.email:
-        if db.query(Employee).filter(Employee.email == request.email).first():
-            raise HTTPException(400, "Email already exists")
-
-    if request.mobile:
-        if db.query(Employee).filter(Employee.mobile == request.mobile).first():
-            raise HTTPException(400, "Mobile already exists")
-
-    if request.roll_no:
-        if db.query(Employee).filter(Employee.roll_no == request.roll_no).first():
-            raise HTTPException(400, "Roll no already exists")
-
-    # 🏗 Create employee
-    employee = Employee(
+    # Translate the auth-side CreateEmployeeSchema into the canonical
+    # EmployeeCreate. Fields not present on CreateEmployeeSchema
+    # (address, hostel, etc.) fall through as None — admins can fill them
+    # later via PUT /employees/{id}.
+    payload = EmployeeCreate(
         name=request.name,
-        user_type=request.user_type,
-        email=request.email.lower().strip() if request.email else None,
-        password_hash=hash_password(request.password) if request.password else None,
-        mobile=request.mobile.strip() if request.mobile else None,
-        roll_no=request.roll_no,
-        company_id=request.company_id,
-        department_id=request.department_id,
+        email=request.email,
+        company_id=company_id,
         role_id=request.role_id,
-        is_verified=True  # optional
+        user_type=request.user_type,
+        department_id=request.department_id,
+        mobile=request.mobile,
     )
 
-    db.add(employee)
-    db.commit()
-    db.refresh(employee)
+    employee = employee_crud.create_employee(
+        db, payload, current_user, background_tasks,
+    )
 
     return {
         "status": status.HTTP_200_OK,
         "message": "Employee Created Successfully",
-        "data":{
+        "data": {
             "id": employee.id,
             "name": employee.name,
-            "roll_no": employee.roll_no
-        }
+            "roll_no": employee.roll_no,
+        },
     }
 
 # Admin Login
@@ -197,10 +199,34 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
             }
         }
 
-    except Exception as e:
-        logger.exception(f"Google login failed: {str(e)}")
+    except HTTPException:
+        # Validation errors raised inside the try block (unverified email,
+        # access denied, user not found) should reach the client as-is.
+        # Previously the generic except below swallowed them into a 500
+        # with the message "Google authentication failed", hiding the
+        # real reason from the caller.
+        raise
+    except Exception:
+        logger.exception("Google login failed")
         raise HTTPException(status_code=500, detail="Google authentication failed")
-    
+
+
+# Logout
+#
+# JWTs are stateless and don't carry server-side session state, so this
+# endpoint is intentionally a no-op: the client is expected to discard
+# the token on its side. A future Phase 2 refresh-token implementation
+# will replace this with real server-side revocation (deny-list or
+# token-version on Employee). Keeping the URL stable now means the
+# Flutter and Admin React clients can wire the logout button today.
+@router.post("/logout", response_model=ApiResponse)
+def logout(current_user: Employee = Depends(get_current_user)):
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Logged out. Discard the token on the client.",
+        "data": {},
+    }
+
 
 # Admin Change Password
 @router.post("/change-password", response_model=ApiResponse)

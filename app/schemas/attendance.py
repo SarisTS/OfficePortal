@@ -45,6 +45,11 @@ class AttendanceUpdate(StrictRequestModel):
 
 
 class ManualAttendanceCreate(StrictRequestModel):
+    # `date` moved into the body during Phase 1 stabilization. Previously
+    # it lived as an unannotated function parameter on the router, which
+    # FastAPI parses as a query string — awkward for callers and
+    # inconsistent with how every other write endpoint takes its data.
+    date: date
     check_in: Optional[datetime] = None
     check_out: Optional[datetime] = None
     reason: Optional[str] = None

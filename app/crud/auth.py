@@ -83,6 +83,19 @@ def require_admin(user = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Not authorized")
     return user
 
+
+def require_super_admin(user = Depends(get_current_user)):
+    """Gate that allows ONLY super_admin.
+
+    Use this on endpoints that should never be reachable by an
+    office_admin — global company management, cross-tenant operations,
+    anything that affects more than one company's data.
+    """
+    if user.user_type != UserTypes.super_admin:
+        raise HTTPException(status_code=403, detail="Super admin only")
+    return user
+
+
 def require_user(user = Depends(get_current_user)):
     if user.user_type not in [UserTypes.super_admin, UserTypes.office_admin, UserTypes.staff, UserTypes.employee]:
         raise HTTPException(status_code=403, detail="Not authorized")

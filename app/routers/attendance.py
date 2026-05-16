@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime
 
+from app.core.permissions import assert_can_access_employee
 from app.database.database import get_db
 from app.crud import attendance as attendance_crud
 from app.crud.auth import require_user, require_admin
@@ -142,24 +142,38 @@ def delete_attendance(
     }
 
 
-@router.post("/manual", response_model=ApiResponse[AttendanceResponse])
+@router.post(
+    "/manual/{employee_id}",
+    response_model=ApiResponse[AttendanceResponse],
+)
 def mark_manual_attendance(
     employee_id: int,
-    date: datetime,
     data: ManualAttendanceCreate,
     db: Session = Depends(get_db),
-    user = Depends(require_admin)
+    user = Depends(require_admin),
 ):
+    """Admin-only manual attendance marking.
+
+    Phase 1 rewrite: `employee_id` is now in the path and `date` lives
+    inside the body schema (ManualAttendanceCreate). Previously both were
+    unannotated function parameters, which FastAPI silently treated as
+    query strings.
+
+    Tenant scoping: `assert_can_access_employee` gates the actor at the
+    router boundary; the CRUD layer also re-checks, so a defense-in-depth
+    cross-tenant attempt fails twice.
+    """
+    assert_can_access_employee(db, employee_id, user)
     attendance = attendance_crud.mark_manual_attendance(
         db,
         employee_id,
-        date,
+        data.date,
         data,
-        user
+        user,
     )
 
     return {
         "status": status.HTTP_200_OK,
         "message": "Manual attendance marked",
-        "data": attendance
+        "data": attendance,
     }
