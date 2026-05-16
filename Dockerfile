@@ -31,6 +31,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # location.json, the venv, logs, etc. so they never reach the image.
 COPY --chown=app:app . .
 
+# Pre-create the logs/ directory the app writes to at import time
+# (app/core/logger.py runs os.makedirs("logs")) and make sure /app
+# itself is owned by `app` — `COPY --chown` only sets ownership on the
+# files it copies, not on the WORKDIR, so without this the `app` user
+# can't create subdirs inside the (root-owned) /app.
+RUN mkdir -p logs && chown -R app:app /app
+
 # Drop privileges before the CMD runs.
 USER app
 

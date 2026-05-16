@@ -24,7 +24,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-office_portal}
     volumes:
-      - db_data:/var/lib/postgresql/data
+      # Postgres 18+ wants the mount at /var/lib/postgresql (not the
+      # historical /var/lib/postgresql/data) so the image can manage
+      # major-version subdirectories itself — required for
+      # `pg_upgrade --link` to work without mount-boundary issues.
+      # See docker-library/postgres issue #37 / PR #1259.
+      - db_data:/var/lib/postgresql
     healthcheck:
       # `$$` escapes the variable so docker-compose passes it through
       # to the shell INSIDE the container instead of trying to expand
