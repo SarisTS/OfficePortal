@@ -8,6 +8,7 @@ from app.schemas.employee import EmployeeCreate, EmployeeUpdate
 from fastapi import HTTPException, BackgroundTasks
 from app.crud.auth import is_global_admin
 from app.core.logger import get_logger
+from app.services.audit import log_audit, snapshot
 from app.utils.hash import hash_password
 from datetime import datetime, timezone, date
 from app.models.assignment import EmployeeShiftAssignment
@@ -149,6 +150,19 @@ def create_employee(db: Session, employee: EmployeeCreate, user, background_task
             )
 
             db.add(assignment)
+
+        # 📝 Audit BEFORE commit so the row commits in the same txn.
+        # Snapshot AFTER flush so id/roll_no are populated; password_hash
+        # is dropped from the snapshot — it's never useful to an auditor
+        # and re-publishing it widens the blast radius of a leaked log.
+        after = snapshot(db_employee)
+        if after is not None:
+            after.pop("password_hash", None)
+        log_audit(
+            db, actor=user, action="employee.create",
+            entity_type="employee", entity_id=db_employee.id,
+            company_id=db_employee.company_id, after=after,
+        )
 
         # ✅ Single commit
         db.commit()
@@ -368,11 +382,27 @@ def update_employee(db: Session, employee_id: int, employee: EmployeeUpdate, use
             if not role:
                 raise HTTPException(400, "Invalid role")
 
+        # 📝 Capture pre-update snapshot before fields mutate.
+        before = snapshot(db_employee)
+        if before is not None:
+            before.pop("password_hash", None)
+
         # 🔄 Apply updates
         for key, value in update_data.items():
             setattr(db_employee, key, value)
 
         db_employee.updated_by = user.id
+
+        db.flush()
+        after = snapshot(db_employee)
+        if after is not None:
+            after.pop("password_hash", None)
+        log_audit(
+            db, actor=user, action="employee.update",
+            entity_type="employee", entity_id=db_employee.id,
+            company_id=db_employee.company_id,
+            before=before, after=after,
+        )
 
         db.commit()
         db.refresh(db_employee)
@@ -405,8 +435,18 @@ def delete_employee(db: Session, employee_id: int, user):
         if employee.user_type == UserTypes.super_admin:
             raise HTTPException(400, "Cannot delete super admin")
 
+        before = snapshot(employee)
+        if before is not None:
+            before.pop("password_hash", None)
+
         employee.deleted_at = datetime.now(timezone.utc)
         employee.updated_by = user.id
+
+        log_audit(
+            db, actor=user, action="employee.delete",
+            entity_type="employee", entity_id=employee.id,
+            company_id=employee.company_id, before=before,
+        )
 
         db.commit()
 

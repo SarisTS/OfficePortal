@@ -1,5 +1,6 @@
 from .assignment import *
 from .attendance import *
+from .audit_log import *
 from .company import *
 from .department import *
 from .employee import *

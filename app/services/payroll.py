@@ -23,6 +23,7 @@ from app.crud.salary_structure import get_current_structure
 from app.models.attendance import Attendance, AttendanceStatus
 from app.models.employee import Employee, UserTypes
 from app.models.payslip import Payslip
+from app.services.audit import log_audit, snapshot
 
 
 def _last_day_of_month(year: int, month: int) -> date:
@@ -201,6 +202,12 @@ def generate_payslip(
     )
 
     db.add(payslip)
+    db.flush()  # populate id for the audit snapshot
+    log_audit(
+        db, actor=actor, action="payslip.generate",
+        entity_type="payslip", entity_id=payslip.id,
+        company_id=company_id, after=snapshot(payslip),
+    )
     db.commit()
     db.refresh(payslip)
     return payslip

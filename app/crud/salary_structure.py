@@ -21,6 +21,7 @@ from app.database.database import with_transaction
 from app.models.employee import Employee
 from app.models.payslip import SalaryStructure
 from app.schemas.payslip import SalaryStructureCreate
+from app.services.audit import log_audit, snapshot
 
 
 def _target_employee_or_403(db: Session, employee_id: int, actor):
@@ -69,6 +70,12 @@ def create_structure(db: Session, data, actor) -> SalaryStructure:
 
     with with_transaction(db):
         db.add(structure)
+        db.flush()
+        log_audit(
+            db, actor=actor, action="salary_structure.create",
+            entity_type="salary_structure", entity_id=structure.id,
+            company_id=target.company_id, after=snapshot(structure),
+        )
     db.refresh(structure)
     return structure
 
@@ -124,10 +131,20 @@ def update_structure(
     if not update_data:
         return structure
 
+    before = snapshot(structure)
+    target_company_id = structure.employee.company_id if structure.employee else None
+
     with with_transaction(db):
         for key, value in update_data.items():
             setattr(structure, key, value)
         structure.updated_by = actor.id
+        db.flush()
+        log_audit(
+            db, actor=actor, action="salary_structure.update",
+            entity_type="salary_structure", entity_id=structure.id,
+            company_id=target_company_id,
+            before=before, after=snapshot(structure),
+        )
     db.refresh(structure)
     return structure
 
@@ -136,9 +153,16 @@ def delete_structure(
     db: Session, structure_id: int, actor
 ) -> SalaryStructure:
     structure = get_structure(db, structure_id, actor)
+    before = snapshot(structure)
+    target_company_id = structure.employee.company_id if structure.employee else None
     with with_transaction(db):
         structure.deleted_at = datetime.now(timezone.utc)
         structure.updated_by = actor.id
+        log_audit(
+            db, actor=actor, action="salary_structure.delete",
+            entity_type="salary_structure", entity_id=structure.id,
+            company_id=target_company_id, before=before,
+        )
     return structure
 
 

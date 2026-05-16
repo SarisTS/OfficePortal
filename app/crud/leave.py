@@ -6,6 +6,7 @@ from app.models.employee import Employee, UserTypes
 from app.schemas.leave import LeaveCreate, LeaveUpdate, LeaveResponse
 from app.crud.attendance import apply_leave_to_attendance
 from app.crud.auth import is_global_admin
+from app.services.audit import log_audit, snapshot
 from app.services.leave_balance import (
     assert_can_debit, billable_leave_days, debit, get_or_init_balance, refund,
 )
@@ -124,6 +125,8 @@ def approve_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
     )
     assert_can_debit(balance, days)
 
+    before = snapshot(leave)
+
     leave.status = LeaveStatus.approved
     leave.approved_by = admin.id
     leave.approved_at = datetime.now(timezone.utc)
@@ -133,6 +136,12 @@ def approve_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
     try:
         debit(balance, days)
         apply_leave_to_attendance(db, leave)
+        log_audit(
+            db, actor=admin, action="leave.approve",
+            entity_type="leave", entity_id=leave.id,
+            company_id=leave.employee.company_id,
+            before=before, after=snapshot(leave),
+        )
         db.commit()
         db.refresh(leave)
         return leave
@@ -156,9 +165,18 @@ def reject_leave(db: Session, leave_id: int, admin)-> LeaveResponse:
     if leave.status != LeaveStatus.pending:
         raise HTTPException(400, "Already processed")
 
+    before = snapshot(leave)
+
     leave.status = LeaveStatus.rejected
     leave.approved_by = admin.id
     leave.approved_at = datetime.now(timezone.utc)
+
+    log_audit(
+        db, actor=admin, action="leave.reject",
+        entity_type="leave", entity_id=leave.id,
+        company_id=leave.employee.company_id,
+        before=before, after=snapshot(leave),
+    )
 
     db.commit()
     db.refresh(leave)
@@ -332,7 +350,13 @@ def delete_leave(db: Session, leave_id: int, user):
             )
             refund(balance, days)
 
+        before = snapshot(leave)
         leave.deleted_at = datetime.now(timezone.utc)
+        log_audit(
+            db, actor=user, action="leave.delete",
+            entity_type="leave", entity_id=leave.id,
+            company_id=leave.employee.company_id, before=before,
+        )
         db.commit()
     except Exception:
         db.rollback()
