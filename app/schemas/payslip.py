@@ -77,6 +77,17 @@ class SalaryStructureResponse(BaseModel):
 
 # ---------- Payslip ----------
 
+class PayslipGenerateRequest(StrictRequestModel):
+    year: int
+    month: int
+
+    @field_validator("month")
+    def month_in_range(cls, v: int) -> int:
+        if not 1 <= v <= 12:
+            raise ValueError("month must be in 1..12")
+        return v
+
+
 class PayslipResponse(BaseModel):
     id: int
     employee_id: int
