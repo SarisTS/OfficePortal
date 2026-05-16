@@ -389,6 +389,53 @@ def test_half_day_leave_ignores_holidays(client, stack, db_session):
     assert sick["used"] == 0.5  # half-day, not 0
 
 
+def test_leave_skips_weekly_off_days(client, stack, db_session):
+    """A leave spanning a Sunday in a company that declares Sunday as a
+    weekly-off doesn't debit that day."""
+    from app.models.holiday import CompanyWeeklyOff
+
+    fx = stack
+    _seed_policy(db_session, fx["company"].id, LeaveType.casual, 10.0)
+
+    # Sunday = 6 in Python's date.weekday()
+    db_session.add(CompanyWeeklyOff(
+        company_id=fx["company"].id, day_of_week=6,
+    ))
+    db_session.commit()
+
+    emp_token = _employee_token(client)
+    admin_token = _admin_token(client)
+
+    # Mar 13-15, 2026 — Mar 15 is a Sunday. 3 calendar days, 1 is a
+    # weekly-off → 2 billable days.
+    r = client.post(
+        "/leave/",
+        json={
+            "employee_id": fx["employee"].id,
+            "leave_type": "casual",
+            "start_date": "2026-03-13",
+            "end_date": "2026-03-15",
+        },
+        headers=_auth(emp_token),
+    )
+    assert r.status_code == 200, r.text
+    leave_id = r.json()["data"]["id"]
+
+    r = client.post(
+        f"/leave/{leave_id}/approve", headers=_auth(admin_token)
+    )
+    assert r.status_code == 200, r.text
+
+    r = client.get(
+        "/leave-balances/me?year=2026", headers=_auth(emp_token)
+    )
+    casual = next(
+        b for b in r.json()["data"] if b["leave_type"] == "casual"
+    )
+    assert casual["used"] == 2.0   # Sunday skipped
+    assert casual["remaining"] == 8.0
+
+
 def test_cross_year_leave_debits_only_start_year(client, stack, db_session):
     fx = stack
     _seed_policy(db_session, fx["company"].id, LeaveType.earned, 10.0)

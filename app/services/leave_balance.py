@@ -71,10 +71,15 @@ def billable_leave_days(
     # Import lazily so this module doesn't pull crud/holiday at module
     # load (avoids a potential circular import if crud/holiday ever
     # needs to call back into leave_balance).
-    from app.crud.holiday import holiday_dates_in_range
+    # non_working_dates_in_range unions explicit holidays + weekly-off
+    # pattern expansion, so a leave spanning a Sunday in a company that
+    # declares Sunday as a weekly-off doesn't debit that day.
+    from app.crud.holiday import non_working_dates_in_range
 
-    holidays = holiday_dates_in_range(db, company_id, start_date, end_date)
-    return float(max(0.0, raw - len(holidays)))
+    non_working = non_working_dates_in_range(
+        db, company_id, start_date, end_date
+    )
+    return float(max(0.0, raw - len(non_working)))
 
 
 # ---------------------------------------------------------------------------
