@@ -24,6 +24,7 @@ from app.routers.me import router as me_router
 from app.routers.salary_structure import router as salary_structure_router
 from app.routers.payslip import router as payslip_router
 from app.routers.reports import router as reports_router
+from app.routers.holiday import router as holiday_router
 from app.routers.admin_food import router as admin_food_router
 from app.routers.employee_food import router as employee_food_router
 from app.routers.hostel import router as hostel_router
@@ -177,6 +178,7 @@ app.include_router(me_router, prefix="/me")
 app.include_router(salary_structure_router, prefix="/salary-structures")
 app.include_router(payslip_router, prefix="/payslips")
 app.include_router(reports_router, prefix="/reports")
+app.include_router(holiday_router, prefix="/company-holidays")
 app.include_router(admin_food_router, prefix="/admin/food")
 app.include_router(employee_food_router, prefix="/employee/food")
 app.include_router(hostel_router, prefix="/hostels")

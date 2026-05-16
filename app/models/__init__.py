@@ -4,6 +4,7 @@ from .company import *
 from .department import *
 from .employee import *
 from .food import *
+from .holiday import *
 from .hostel import *
 from .leave import *
 from .location import *
