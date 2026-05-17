@@ -130,10 +130,12 @@ bounds applied across the codebase (Phase 1 hardening).
 ```
 src/
 ├── api/           apiClient + ApiResponse/PaginatedResponse types
-├── auth/          AuthProvider, useAuth, token helpers, types
-├── components/    cross-feature UI primitives (placeholder)
-├── features/      one folder per feature module (placeholder)
-├── hooks/         generic React hooks (placeholder)
+├── auth/          AuthProvider (AuthContext.tsx) + useAuth.ts + token helpers + types
+├── components/    cross-feature UI primitives — Badge, DataTable, PageHeader,
+│                  Pagination, SearchInput, Select, StateViews (initial design-system set)
+├── features/      one folder per feature module — currently: employees/
+│                  (types.ts, api.ts, components/, pages/, index.ts)
+├── hooks/         generic React hooks (empty for now)
 ├── layouts/       AuthLayout (login), AdminLayout (sidebar)
 ├── lib/           env.ts (typed import.meta.env access)
 ├── pages/         LoginPage, DashboardPage, NotFoundPage, ForbiddenPage

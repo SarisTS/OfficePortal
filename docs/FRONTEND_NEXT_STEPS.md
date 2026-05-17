@@ -48,37 +48,60 @@ Useful scripts:
 
 ---
 
+## What's wired so far
+
+- **Employees module (read-only)** — `/employees` list (q +
+  user_type + is_active filters; 25/page paginated) + `/employees/:id`
+  detail (Identity / Org / Address / Metadata sections). Source under
+  `src/features/employees/`. Mutations deferred (see below).
+- **Design system primitives** — initial lean set in `src/components/`:
+  Badge (5 variants), DataTable (headless, column-def driven,
+  row-click), PageHeader, Pagination (skip/limit), SearchInput
+  (300ms debounced), Select, StateViews (Loading / Empty / Error).
+  Add to this set when a feature genuinely needs something new.
+- **TanStack Query usage pattern** established: feature-local
+  `api.ts` exporting query-key constants + `useXxx` hooks; rows wrap
+  the backend's `ApiResponse[T].data` so callers see the unwrapped
+  payload. `placeholderData: (prev) => prev` keeps the current page
+  visible during refetch.
+
 ## What's NOT wired (build these next)
 
-The sidebar in `AdminLayout` shows placeholder routes for Employees,
-Leaves, Attendance, Payslips, and Audit log. Each currently renders a
-"feature module not yet wired" placeholder.
+Sidebar in `AdminLayout` still shows placeholder routes for Audit
+log, Leaves, Attendance, Payslips. Each renders "feature module not
+yet wired" until its module lands.
 
-### Recommended build order
+### Recommended build order from here
 
-Start with the lowest-risk read-only flows so you exercise the auth +
-API layers before any mutations.
-
-1. **Employees** (list + read + filters) — most-touched admin surface
-2. **Audit log** (read-only) — verifies pagination + filter UX
-3. **Leaves** (list + approve/reject) — first mutation flow
+1. **Employees mutations** — activate/deactivate + admin password
+   reset first (simplest — confirm modal only); then create/edit
+   (needs `react-hook-form` + `zod`); CSV import last.
+2. **Audit log** (read-only) — verifies pagination + filter UX on a
+   simpler data shape; second exercise of the DataTable.
+3. **Leaves** (list + approve/reject) — second mutation flow.
 4. **Attendance** (list + manual mark) — geo-fence already tested on
-   backend
-5. **Payslips** (list + PDF download) — exercises the file-response path
-6. **Holidays + weekly-offs** (CRUD) — calendar UI
+   backend.
+5. **Payslips** (list + PDF download) — exercises the file-response
+   path.
+6. **Holidays + weekly-offs** (CRUD) — calendar UI.
 
-Layers below that haven't been built but will be needed for ANY feature:
+### Packages to add when each phase needs them
 
-- **Design system primitives** — Button, Input, Select, Table,
-  Pagination, Toast, Modal. Lives in `src/components/`. Pick a base
-  set before building two features; otherwise components proliferate.
-- **Form library** — recommended: `react-hook-form` + `zod` for
-  validation. Not installed; `npm install react-hook-form zod
-  @hookform/resolvers` when the first form lands.
-- **Toast / notification UI** — recommended: `sonner` (small, no peer
-  deps). Add when the first mutation needs success/error feedback.
-- **Layout polish** — top bar with breadcrumbs + user menu, a real
-  active-state on sidebar nav, mobile-responsive drawer (low priority).
+- **First mutation**: `npm install react-hook-form zod
+  @hookform/resolvers sonner` — form lib + schema validation + toast
+  notifications. Wire `<Toaster />` once at the AdminLayout root.
+- **First Modal**: build a Modal primitive in `src/components/` (no
+  library needed — Tailwind + the native `<dialog>` element handles
+  this cleanly with focus-trap behaviour built in).
+- **First sortable table**: bring in TanStack Table when DataTable's
+  sort hook stops being enough; column definitions are already
+  shaped to be a drop-in.
+
+### Layout polish (low priority)
+
+- Top bar with breadcrumbs + user menu.
+- Real active-state styling on sidebar nav.
+- Mobile-responsive drawer.
 
 ---
 

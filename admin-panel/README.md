@@ -68,12 +68,29 @@ Imports use the `@/*` alias for `src/*`. Configured in
 wraps the admin layout. A staff/employee bearer token redirects to
 `/forbidden`.
 
-## What's NOT in this scaffold
+## Feature status
 
-- Feature screens (employees, leaves, payroll, etc.) — placeholder
-  pages under `<AdminLayout />` render "feature module not yet wired".
-- Tailwind theme customization — using v4 defaults for now.
-- Form validation library (zod / react-hook-form) — added per-feature
-  as needed.
+| Module | Status |
+|---|---|
+| Employees | 🟡 Read-only foundation shipped (list + detail + filters + pagination, 25/page). Mutations deferred. |
+| Audit log | ⏳ Not started — recommended next read-only flow |
+| Leaves | ⏳ Not started (first mutation flow) |
+| Attendance | ⏳ Not started |
+| Payslips | ⏳ Not started |
+| Holidays / weekly-offs | ⏳ Not started |
 
-These land as feature modules get wired up.
+## What's NOT in this scaffold yet
+
+- **Mutations on any feature** — create / edit / delete / activate
+  flows for Employees, etc. Will land with `react-hook-form` + `zod`
+  (form validation) + `sonner` (toast feedback) + a Modal primitive.
+- **Tailwind theme customization** — using v4 defaults for now.
+- **Form validation library** (zod / react-hook-form) — added when
+  the first mutation flow lands.
+- **Sorting** on tables — DataTable is sort-ready via column `id`
+  but no sort controls yet.
+- **URL state** for filters + pagination — currently local component
+  state; revisit when the second feature module shows it'd help.
+
+See [`../docs/FRONTEND_NEXT_STEPS.md`](../docs/FRONTEND_NEXT_STEPS.md)
+for the per-feature build order and checklist.
