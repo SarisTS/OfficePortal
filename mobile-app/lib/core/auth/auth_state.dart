@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:officeportal_mobile/core/api/api_client.dart';
 
-import 'auth_models.dart';
-import 'token_storage.dart';
+import 'package:officeportal_mobile/core/auth/auth_models.dart';
+import 'package:officeportal_mobile/core/auth/token_storage.dart';
 
 /// Auth state. Three discrete states keep the router's redirect logic
 /// simple: while we're loading, don't bounce; once resolved, send the

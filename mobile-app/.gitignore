@@ -10,6 +10,13 @@
 .flutter-plugins
 .flutter-plugins-dependencies
 
+# Lockfile — deliberately gitignored while the project is in scaffold
+# stage. The Flutter SDK in CI may resolve transitive deps differently
+# than a contributor's local version, and a committed lockfile would
+# cause noisy diffs on every fresh `flutter pub get`. Revisit when the
+# dep set stabilises and the team standardises on a Flutter version.
+pubspec.lock
+
 # Flutter / Dart build output
 build/
 

@@ -3,7 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:officeportal_mobile/core/auth/token_storage.dart';
 import 'package:officeportal_mobile/core/env/env.dart';
 
-import 'api_types.dart';
+import 'package:officeportal_mobile/core/api/api_types.dart';
 
 /// Single Dio instance for the whole app. Interceptor attaches the
 /// stored JWT on every outgoing request and clears it on 401.
