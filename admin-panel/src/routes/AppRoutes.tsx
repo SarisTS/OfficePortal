@@ -1,5 +1,9 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import {
+  EmployeeDetailPage,
+  EmployeesListPage,
+} from "@/features/employees";
 import { AdminLayout } from "@/layouts/AdminLayout";
 import { AuthLayout } from "@/layouts/AuthLayout";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -49,7 +53,8 @@ export function AppRoutes() {
             sidebar links render. Replace with real screens as feature
             modules land under src/features/.
           */}
-          <Route path="/employees" element={<Placeholder name="Employees" />} />
+          <Route path="/employees" element={<EmployeesListPage />} />
+          <Route path="/employees/:id" element={<EmployeeDetailPage />} />
           <Route path="/leaves" element={<Placeholder name="Leaves" />} />
           <Route
             path="/attendance"
