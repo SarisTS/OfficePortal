@@ -1,0 +1,39 @@
+name: officeportal_mobile
+description: OfficePortal HRMS — Flutter mobile app (employee self-service).
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP client with interceptor support — Flutter analogue of Axios in
+  # the admin-panel. Single Dio instance lives in lib/core/api/api_client.dart.
+  dio: ^5.7.0
+
+  # Encrypted at-rest token storage. Backs the Keychain on iOS,
+  # EncryptedSharedPreferences on Android.
+  flutter_secure_storage: ^9.2.2
+
+  # Declarative router with type-safe redirects — used for auth guards.
+  go_router: ^14.6.2
+
+  # State management. Server state + auth state both flow through
+  # Riverpod providers in lib/core/auth/auth_state.dart.
+  flutter_riverpod: ^2.6.1
+
+  # Compile-time env via --dart-define-from-file. Avoids shipping a
+  # parsed .env file at runtime; values are baked into the bundle.
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

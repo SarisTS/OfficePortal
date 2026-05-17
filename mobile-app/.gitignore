@@ -1,0 +1,37 @@
+# Flutter / Dart project ignores. Cross-workspace ignores (.DS_Store etc)
+# live at the monorepo root.
+
+# Dart tooling
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# IDE
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+
+# Platform-specific build artifacts
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/Generated.xcconfig
+android/.gradle/
+android/local.properties
+android/app/release/
+
+# Env overlays
+.env
+.env.local
+.env.*.local
+
+# Coverage
+coverage/

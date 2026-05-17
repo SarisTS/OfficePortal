@@ -1,0 +1,18 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # Treat the standard recommended set as strict. Add per-rule disables
+    # only with a code comment explaining why.
+    prefer_const_constructors: true
+    prefer_const_constructors_in_immutables: true
+    prefer_const_literals_to_create_immutables: true
+    avoid_print: true
+    always_use_package_imports: true
+
+analyzer:
+  errors:
+    # Surface these at error level so CI fails fast — easy to miss in
+    # warning-level output during a noisy build.
+    missing_required_param: error
+    missing_return: error
