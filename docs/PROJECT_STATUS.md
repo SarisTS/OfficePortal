@@ -71,6 +71,7 @@ status table):**
 | `06df16a` | Root `README.md`, `.gitignore`, `docs/` |
 | `24156cb` | admin-panel scaffold (Vite + React 19 + TS + Tailwind v4 + Router 7 + Axios + TanStack Query 5). `npm run build` passes, ~99 KB gzipped JS. Auth foundation + role-gated layout + placeholder pages — no feature screens yet (deliberate, per scaffold-first rule). |
 | `a33d637` | mobile-app Flutter Dart-side scaffold (Dio + Riverpod + go_router + flutter_secure_storage). Platform dirs (`ios/`, `android/`, etc.) are NOT generated — user must run `flutter create .` over the skeleton (documented in `mobile-app/README.md`). |
+| `627b1da` | monorepo cleanup: `docker-compose.yml` and `CLAUDE.md` hoisted to repo root; per-workspace `.gitignore`s normalized to own only their language's noise (root keeps cross-cutting rules); CI compose-smoke job repointed to repo root; `docs/MONOREPO_GUIDE.md` added as the canonical workspace/docker/CI/env reference. CI green (both pytest + compose-smoke). |
 
 ---
 
@@ -78,7 +79,7 @@ status table):**
 
 | Ref | SHA |
 |---|---|
-| `main` | `a33d637` (or whatever the latest is when you read this — `git rev-parse main` to confirm) |
+| `main` | `627b1da` (or whatever the latest is when you read this — `git rev-parse main` to confirm) |
 | `chore/env-example` | tracks `main` |
 | `origin/main` | mirrors `main` |
 | `origin/chore/env-example` | mirrors local |
@@ -93,12 +94,13 @@ user does NOT want per-feature branches.
 ## CI status
 
 `.github/workflows/ci.yml` defines two jobs that fire on any push to
-`main` or PR to `main` when `backend/**` or the workflow itself
-changes:
+`main` or PR to `main` when `backend/**`, the root `docker-compose.yml`,
+or the workflow itself changes:
 
 1. **pytest** — 151 tests, runs from `backend/`
-2. **docker compose smoke** — builds backend image, brings up
-   postgres + redis + migrate + app, probes `/health`
+2. **docker compose smoke** — runs from the repo root (compose file
+   lives there); builds backend image, brings up postgres + redis +
+   migrate + app, probes `/health`
 
 admin-panel and mobile-app do NOT have CI workflows yet. When they
 need them, drop in `.github/workflows/admin-panel.yml` and
