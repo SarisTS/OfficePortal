@@ -147,12 +147,13 @@ Notes:
 
 ### Docker Compose (full local stack)
 
-`docker-compose.yml` bundles Postgres 18, Redis 7, a one-shot
-migration step, and the API:
+`docker-compose.yml` lives at the **repo root** (it's a monorepo
+asset — the admin-panel and mobile-app dev loops also connect to the
+stack it brings up). From the repo root:
 
 ```bash
-cp .env.example .env       # if you haven't already
-docker compose up --build  # add -d to detach
+cp backend/.env.example backend/.env   # if you haven't already
+docker compose up --build              # add -d to detach
 ```
 
 Bring-up order is enforced via healthchecks:
@@ -168,6 +169,10 @@ not port-mapped to the host. The API is exposed on `localhost:8000`.
 
 Stop with `docker compose down`. Add `-v` to also drop the Postgres
 data volume (full reset on next `up`).
+
+The compose file bind-mounts `backend/location.json` into the app
+container. See `docs/MONOREPO_GUIDE.md` for the full compose
+walkthrough.
 
 ---
 

@@ -1,16 +1,20 @@
-# Local development stack.
+# Local development stack for the OfficePortal monorepo.
 #
 # Brings up Postgres 18 + Redis 7, runs `alembic upgrade head` once,
 # then starts uvicorn with /health, /docs, and the rest of the API
 # reachable on http://localhost:8000.
 #
-# Usage:
+# Usage (from the repo root):
 #
 #   docker compose up --build              # foreground
 #   docker compose up --build -d           # detached
 #   docker compose logs -f app             # tail app logs
 #   docker compose down                    # stop, keep volume
 #   docker compose down -v                 # stop, drop the db volume
+#
+# This file orchestrates the backend workspace only. The admin-panel
+# and mobile-app run on the host via `npm run dev` / `flutter run`
+# and connect to the API at http://localhost:8000.
 #
 # Compose v2 is assumed (no top-level `version:` key, supports
 # service_completed_successfully / service_healthy depends_on).
@@ -53,9 +57,9 @@ services:
   # service depends on this completing successfully so the API never
   # starts against a stale schema.
   migrate:
-    build: .
+    build: ./backend
     command: ["alembic", "upgrade", "head"]
-    env_file: .env
+    env_file: ./backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-office_portal}
     depends_on:
@@ -64,8 +68,8 @@ services:
     restart: "no"
 
   app:
-    build: .
-    env_file: .env
+    build: ./backend
+    env_file: ./backend/.env
     # Compose overrides win over .env for these — the app must reach
     # the compose-managed db / redis by their service names, not the
     # host's localhost.
@@ -77,9 +81,9 @@ services:
       - "8000:8000"
     volumes:
       # location.json is gitignored AND dockerignored, so it's not in
-      # the image. Mount it from the project root on the host so
+      # the image. Mount it from backend/ on the host so
       # app/crud/location.py can find it at /app/location.json.
-      - ./location.json:/app/location.json:ro
+      - ./backend/location.json:/app/location.json:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

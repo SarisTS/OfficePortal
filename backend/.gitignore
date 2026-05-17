@@ -1,37 +1,36 @@
-# Environment variables
-.env
+# Python / FastAPI / Alembic / pytest ignores.
+# Cross-cutting ignores (.env, .DS_Store, .vscode, *.log) live at the
+# monorepo root.
 
-# Python
+# Python bytecode + caches
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 
-# Virtual environment
+# Virtual environments
 venv/
 env/
+.venv/
 
-# Logs
-*.log
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# VS Code
-.vscode/
-
-# Database
+# Local SQLite (e.g. ad-hoc dev DBs — not the test SQLite, which is in-memory)
 *.sqlite3
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Docker
-*.pid
-
-# Secrets
+# Secrets that aren't .env (covered at root)
 secrets.json
+
+# Process / runtime
+*.pid
 
 # Bulk reference data. ~38MB countries/states/cities dataset loaded by
 # app/crud/location.py at runtime. Removed from git history in May 2026
-# (was bloating every clone). Each deployment needs to copy this file
-# onto disk manually — see README "Data files" section.
+# (was bloating every clone). Each deployment / dev machine needs to
+# copy this file onto disk manually — see Readme "Data files" section.
 location.json
+location.json.backup

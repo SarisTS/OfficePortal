@@ -8,6 +8,7 @@ go deeper on specific areas:
 
 | Document | Use when |
 |---|---|
+| [MONOREPO_GUIDE.md](./MONOREPO_GUIDE.md) | You need workspace purpose, startup commands, docker usage, dev workflow, CI strategy, env strategy |
 | [CURRENT_ARCHITECTURE.md](./CURRENT_ARCHITECTURE.md) | You need stack details, auth flow, tenant model, migration head, CI structure |
 | [FRONTEND_NEXT_STEPS.md](./FRONTEND_NEXT_STEPS.md) | You're picking up the React admin panel |
 | [MOBILE_NEXT_STEPS.md](./MOBILE_NEXT_STEPS.md) | You're picking up the Flutter mobile app |
@@ -153,13 +154,12 @@ need them, drop in `.github/workflows/admin-panel.yml` and
 git clone https://github.com/SarisTS/OfficePortal.git
 cd OfficePortal
 
-# Backend
-cd backend
-cp .env.example .env
+# Backend stack (compose lives at the repo root)
+cp backend/.env.example backend/.env
 docker compose up --build         # full stack on :8000
 
 # Admin panel (in another terminal)
-cd ../admin-panel
+cd admin-panel
 cp .env.example .env.local        # adjust VITE_API_URL
 npm install
 npm run dev                       # :5173
@@ -171,3 +171,6 @@ cp .env.example .env              # adjust API_URL
 flutter pub get
 flutter run --dart-define-from-file=.env
 ```
+
+See [`MONOREPO_GUIDE.md`](./MONOREPO_GUIDE.md) for the canonical
+startup / docker / CI / env reference.

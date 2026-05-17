@@ -13,16 +13,20 @@ Snapshot of the live system. For phase status see
 OfficePortal/
 ├── .git/                       single repo root
 ├── .github/workflows/ci.yml    backend pytest + compose-smoke (path-filtered)
-├── .gitignore                  cross-workspace ignores
+├── .gitignore                  cross-cutting ignores only (workspaces own their tooling-specific ignores)
+├── CLAUDE.md                   monorepo-wide rules for Claude sessions
 ├── README.md                   workspace overview
+├── docker-compose.yml          local dev stack (db + redis + migrate + app); orchestrates backend/
 ├── docs/                       project-level docs (you are here)
 ├── backend/                    FastAPI + PostgreSQL + Alembic + Redis
 ├── admin-panel/                React + Vite + TypeScript admin UI
 └── mobile-app/                 Flutter Dart-side scaffold
 ```
 
-Each workspace has its own `.gitignore`, `README.md`, and (for backend
-and admin-panel) lockfile / env example.
+Each workspace owns its `.gitignore`, `README.md`, env example, and
+language-specific tooling config (lockfile, Dockerfile, pubspec, etc.).
+Cross-cutting concerns (compose, CI, root `.gitignore`, `CLAUDE.md`,
+`docs/`) live at the repo root. See `docs/MONOREPO_GUIDE.md`.
 
 ---
 

@@ -1,24 +1,34 @@
-# Logs
-logs
-*.log
+# Node / Vite / TypeScript ignores.
+# Cross-cutting ignores (.env, .DS_Store, .vscode, *.log) live at the
+# monorepo root.
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+build/
+
+# Vite caches
+.vite/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Tooling caches
+.parcel-cache/
+.eslintcache
+
+# Package manager noise
+.npm/
+.yarn/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Vite "local" overrides (e.g. .env.production.local) — env.*.local is
+# also covered at root, but keep this here to match Vite's defaults.
 *.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?

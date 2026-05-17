@@ -1,54 +1,36 @@
-# Monorepo-level gitignore. Each workspace (backend/, admin-panel/,
-# mobile-app/) also has its own .gitignore for language-specific noise.
-# Keep entries here cross-cutting only.
+# Monorepo-level .gitignore. Cross-cutting entries ONLY.
+#
+# Per-workspace ignores live in:
+#   backend/.gitignore        Python/Alembic/pytest
+#   admin-panel/.gitignore    Node/Vite/TypeScript
+#   mobile-app/.gitignore     Flutter/Dart, iOS/Android build artefacts
+#
+# Add a rule here only if it applies to MORE THAN ONE workspace, or to
+# the repo root itself.
 
 # OS noise
 .DS_Store
 Thumbs.db
 
-# Editor + IDE
+# Editor / IDE
 .vscode/
 .idea/
 *.swp
 *~
 
-# Harness files written by the local dev assistant — never tracked.
+# Claude Code session files — local-only, never tracked.
+# CLAUDE.md (uppercase) IS tracked: it carries monorepo-wide rules.
 .claude/
-claude.md
-
-# JavaScript / TypeScript (admin-panel)
-node_modules/
-dist/
-build/
-.parcel-cache/
-.vite/
-*.tsbuildinfo
-.npm/
-.yarn/
 
 # Environment overlays anywhere in the tree
 .env
 .env.local
 .env.*.local
 
-# Flutter / Dart (mobile-app)
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.packages
-.pub-cache/
-.pub/
-build/
-ios/Pods/
-ios/.symlinks/
-android/.gradle/
-android/app/release/
-*.iml
-
-# Logs
+# Logs anywhere
 *.log
 logs/
 
-# Coverage reports
+# Coverage reports anywhere
 coverage/
 .nyc_output/
