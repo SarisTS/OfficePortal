@@ -115,6 +115,12 @@ def admin_login(request: LoginRequest, db: Session = Depends(get_db)):
     if not verify_password(request.password, employee.password_hash):
         raise HTTPException(400, "Invalid credentials")
 
+    if not employee.is_active:
+        # Deactivated accounts get a clear message so the user knows to
+        # contact their admin rather than retrying the password. The
+        # admin-side activate/deactivate flow flips this back.
+        raise HTTPException(403, "Account is deactivated. Contact your administrator.")
+
     token = create_access_token({
         "sub": str(employee.id),
         "user_type": employee.user_type.value,
@@ -178,6 +184,9 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
 
         if employee.user_type not in [UserTypes.super_admin, UserTypes.office_admin]:
             raise HTTPException(403, "Access denied")
+
+        if not employee.is_active:
+            raise HTTPException(403, "Account is deactivated. Contact your administrator.")
 
         # Link Google
         if not employee.google_id:
@@ -275,6 +284,9 @@ def employee_login(request: EmployeeLoginSchema, db: Session = Depends(get_db)):
     if not verify_password(request.password, employee.password_hash):
         raise HTTPException(400, "Invalid credentials")
 
+    if not employee.is_active:
+        raise HTTPException(403, "Account is deactivated. Contact your administrator.")
+
     token = create_access_token({
         "sub": str(employee.id),
         "user_type": employee.user_type.value,
@@ -333,6 +345,9 @@ def verify_otp(request: OTPVerifySchema, db: Session = Depends(get_db)):
 
     if not employee:
         raise HTTPException(400, "User not found")
+
+    if not employee.is_active:
+        raise HTTPException(403, "Account is deactivated. Contact your administrator.")
 
     token = create_access_token({
         "sub": str(employee.id),

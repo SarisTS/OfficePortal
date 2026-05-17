@@ -73,6 +73,29 @@ def send_employee_credentials_email(to, roll_no, password):
 
     return
 
+
+def send_employee_password_reset_email(to, roll_no, new_password):
+    """Admin-initiated password reset notification.
+
+    Differs from send_employee_credentials_email only in subject line +
+    body wording so the recipient understands this was a reset (not a
+    first-time onboarding email)."""
+    subject = "Your Password Has Been Reset"
+    body = f"""
+            Your password has been reset by an administrator.
+
+            New login credentials:
+
+            Roll No: {roll_no}
+            Password: {new_password}
+
+            Please change your password after your next login.
+
+            Regards,
+            Admin Team
+            """
+    send_email(to, subject, body)
+
 def create_employee(db: Session, employee: EmployeeCreate, user, background_tasks: BackgroundTasks):
     try:
         data = employee.model_dump()
@@ -229,7 +252,28 @@ def get_employee(db: Session, employee_id: int, user):
         }
 
 
-def get_all_employees(db: Session, user, skip=0, limit=10):
+def get_all_employees(
+    db: Session,
+    user,
+    skip=0,
+    limit=10,
+    q: str | None = None,
+    department_id: int | None = None,
+    user_type=None,
+    is_active: bool | None = None,
+):
+    """Paginated employee directory with filters for the admin UI.
+
+    Filters (all optional, combined with AND):
+      - q              ILIKE match across name + email + roll_no + mobile
+      - department_id  exact match
+      - user_type      UserTypes enum (or its string value)
+      - is_active      True/False match on Employee.is_active
+
+    Tenant scope is unchanged: super_admin sees everyone, office_admin
+    sees only employees in their own company. Filters apply on top of
+    that scope, never widen it.
+    """
     query = (
         db.query(Employee)
         .options(joinedload(Employee.role), joinedload(Employee.department))
@@ -238,6 +282,27 @@ def get_all_employees(db: Session, user, skip=0, limit=10):
 
     if not is_global_admin(user):
         query = query.filter(Employee.company_id == user.company_id)
+
+    if q:
+        like = f"%{q.strip()}%"
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                Employee.name.ilike(like),
+                Employee.email.ilike(like),
+                Employee.roll_no.ilike(like),
+                Employee.mobile.ilike(like),
+            )
+        )
+
+    if department_id is not None:
+        query = query.filter(Employee.department_id == department_id)
+
+    if user_type is not None:
+        query = query.filter(Employee.user_type == user_type)
+
+    if is_active is not None:
+        query = query.filter(Employee.is_active == is_active)
 
     total = query.count()
 
@@ -455,6 +520,132 @@ def delete_employee(db: Session, employee_id: int, user):
     except Exception:
         db.rollback()
         logger.exception("Error deleting employee")
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Admin lifecycle: password reset + activate/deactivate
+# ---------------------------------------------------------------------------
+
+def admin_reset_password(
+    db: Session, employee_id: int, actor, background_tasks: BackgroundTasks,
+):
+    """Generate a fresh password, hash + store it, and email the new
+    credentials to the employee.
+
+    Tenant-checked: super_admin can reset anyone; office_admin can only
+    reset employees in their own company. Returns the employee row;
+    the new password is NOT returned (it leaves only via the email so
+    audit trails stay clean).
+
+    The audit row records the action and the actor, but NEVER the
+    password or its hash. Re-publishing either through a log read
+    would widen the blast radius of a leaked log.
+    """
+    try:
+        employee = db.query(Employee).filter(
+            Employee.id == employee_id,
+            Employee.deleted_at == None,
+        ).first()
+
+        if not employee:
+            return None
+
+        if not is_global_admin(actor):
+            if employee.company_id != actor.company_id:
+                raise HTTPException(403, "Not allowed")
+
+        new_password = generate_password()
+        employee.password_hash = hash_password(new_password)
+        employee.updated_by = actor.id
+
+        log_audit(
+            db, actor=actor, action="employee.password_reset",
+            entity_type="employee", entity_id=employee.id,
+            company_id=employee.company_id,
+            # No before/after of the hash — see docstring.
+        )
+
+        db.commit()
+        db.refresh(employee)
+
+        if employee.email:
+            try:
+                background_tasks.add_task(
+                    send_employee_password_reset_email,
+                    employee.email,
+                    employee.roll_no,
+                    new_password,
+                )
+            except Exception as e:
+                logger.error(f"Password reset email failed: {e}")
+
+        return employee
+
+    except Exception:
+        db.rollback()
+        logger.exception("Error resetting employee password")
+        raise
+
+
+def set_employee_active(
+    db: Session, employee_id: int, actor, is_active: bool,
+):
+    """Toggle Employee.is_active. Deactivated employees cannot log in
+    (the login queries filter by is_active). Reversible — call this
+    function with is_active=True to re-enable.
+
+    Distinct from delete_employee, which sets deleted_at and is the
+    one-way soft-delete. Activate/deactivate is the reversible business
+    state for "this person is on leave / suspended / paused".
+    """
+    try:
+        employee = db.query(Employee).filter(
+            Employee.id == employee_id,
+            Employee.deleted_at == None,
+        ).first()
+
+        if not employee:
+            return None
+
+        if not is_global_admin(actor):
+            if employee.company_id != actor.company_id:
+                raise HTTPException(403, "Not allowed")
+
+        if employee.user_type == UserTypes.super_admin and not is_active:
+            raise HTTPException(400, "Cannot deactivate super admin")
+
+        # No-op short-circuit — saves an audit row.
+        if bool(employee.is_active) == bool(is_active):
+            return employee
+
+        before = snapshot(employee)
+        if before is not None:
+            before.pop("password_hash", None)
+
+        employee.is_active = is_active
+        employee.updated_by = actor.id
+
+        db.flush()
+        after = snapshot(employee)
+        if after is not None:
+            after.pop("password_hash", None)
+
+        log_audit(
+            db, actor=actor,
+            action="employee.activate" if is_active else "employee.deactivate",
+            entity_type="employee", entity_id=employee.id,
+            company_id=employee.company_id,
+            before=before, after=after,
+        )
+
+        db.commit()
+        db.refresh(employee)
+        return employee
+
+    except Exception:
+        db.rollback()
+        logger.exception("Error updating employee is_active")
         raise
 
 
