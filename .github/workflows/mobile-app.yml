@@ -1,0 +1,102 @@
+name: mobile-app CI
+
+on:
+  push:
+    branches: [main]
+    # Trigger when mobile-app/ or this workflow itself changes.
+    # backend and admin-panel each have their own workflow with their
+    # own path filters.
+    paths:
+      - "mobile-app/**"
+      - ".github/workflows/mobile-app.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "mobile-app/**"
+      - ".github/workflows/mobile-app.yml"
+
+# Cancel any in-flight run for the same ref when a new commit lands.
+concurrency:
+  group: mobile-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: analyze + build apk
+    runs-on: ubuntu-latest
+
+    # All run-steps execute from mobile-app/ so the commands match
+    # what a contributor sees when working inside that workspace.
+    defaults:
+      run:
+        working-directory: mobile-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java (Android toolchain)
+        # AGP 8.x requires JDK 17. Picked over 11 because Flutter 3.24+
+        # bumped the default android/gradle wrapper accordingly.
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        # subosito/flutter-action@v2 handles SDK download + caching.
+        # Pinned to 3.27.0 for reproducibility; bump deliberately
+        # rather than letting `stable` float.
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.0"
+          channel: stable
+          cache: true
+
+      - name: Generate platform dirs (scaffold ships Dart-side only)
+        # mobile-app/ contains only lib/, pubspec.yaml, analysis_options.yaml,
+        # .env.example. CI regenerates ios/, android/, web/, etc. via
+        # `flutter create .` every run so the workflow works before
+        # contributors run the one-time local `flutter create .`.
+        #
+        # flutter create . is non-destructive on existing lib/ +
+        # pubspec.yaml + analysis_options.yaml — it only fills in
+        # missing platform dirs and a default test/widget_test.dart.
+        run: |
+          flutter create . --project-name officeportal_mobile --org com.officeportal
+          # The boilerplate widget_test.dart that `flutter create`
+          # writes references a MyApp class our scaffold doesn't
+          # define and would fail to compile under `flutter analyze`.
+          # Real widget/unit tests land in test/ when feature screens
+          # are added.
+          rm -f test/widget_test.dart
+
+      - name: Install dependencies
+        # pub get resolves the deps in pubspec.yaml against the
+        # downloaded SDK; ~/.pub-cache is cached by flutter-action.
+        run: flutter pub get
+
+      - name: Analyze
+        # analysis_options.yaml enforces:
+        #   - always_use_package_imports (no relative imports)
+        #   - avoid_print (use logger / debugPrint)
+        #   - prefer_const_* family
+        #   - missing_required_param + missing_return at error level
+        run: flutter analyze
+
+      - name: Build Android APK (debug)
+        # Validates the whole stack: code compiles, native deps resolve,
+        # Gradle accepts the project, AGP can package the APK.
+        # iOS build needs macOS runners (5-10x cost) — add when iOS
+        # release planning kicks in.
+        run: flutter build apk --debug
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: officeportal-mobile-debug-apk
+          # Path is resolved from the repo root, not the job's
+          # working-directory.
+          path: mobile-app/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7

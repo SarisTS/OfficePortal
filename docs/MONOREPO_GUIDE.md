@@ -288,16 +288,33 @@ Single job `build`:
 
 Concurrency group: `admin-panel-${ref}`, cancel-in-progress.
 
-### Adding mobile-app CI
+### `mobile-app.yml` — mobile app
 
-When the mobile-app ships its first non-scaffold commit, drop in
-`.github/workflows/mobile-app.yml`:
+Runs on push / PR to `main` when any of:
 
-- Path filter: `mobile-app/** + .github/workflows/mobile-app.yml`
-- `defaults.run.working-directory: mobile-app`
-- Steps: subosito/flutter-action@v2 → `flutter pub get` →
-  `flutter analyze` → `flutter test` → `flutter build apk --debug`
-  (release builds need signing config that doesn't belong in OSS CI)
+- `mobile-app/**`
+- `.github/workflows/mobile-app.yml`
+
+Single job `build`:
+
+| Step | Purpose |
+|---|---|
+| setup-java@v4 (temurin 17) | AGP 8.x toolchain |
+| subosito/flutter-action@v2 (pinned 3.27.0) | Flutter SDK + caching |
+| `flutter create .` | Regenerate ios/ + android/ each run — the scaffold ships Dart-side only; this keeps the workflow valid before any contributor runs the one-time local `flutter create .`. The boilerplate `test/widget_test.dart` is deleted (references a non-existent `MyApp`). |
+| `flutter pub get` | Resolve deps |
+| `flutter analyze` | Lints per `analysis_options.yaml` |
+| `flutter build apk --debug` | Validates code compiles, native deps resolve, Gradle accepts the project |
+| upload-artifact `officeportal-mobile-debug-apk` | 7-day retention for download from a failed PR |
+
+Concurrency group: `mobile-app-${ref}`, cancel-in-progress.
+
+iOS build is deferred — needs macOS runners (5–10× the cost). Add a
+parallel `build-ios` job on `macos-latest` when iOS release planning
+kicks in. A `flutter test` step joins the workflow as soon as real
+tests land under `test/`.
+
+### Cross-workspace principle
 
 Keep workflows independent. Don't merge them into one cross-workspace
 mega-workflow — path filters do that for you, and per-workspace
