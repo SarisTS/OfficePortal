@@ -1,7 +1,6 @@
 import {
   createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -31,11 +30,13 @@ import type {
  *     backend endpoints
  *
  * Route guards consume `status` + `user` to decide redirects; feature
- * components consume `user` directly.
+ * components consume `user` directly via the `useAuth` hook (in
+ * ./useAuth.ts — kept in a separate file so this one stays
+ * component-only for Fast Refresh).
  */
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
-interface AuthContextValue {
+export interface AuthContextValue {
   status: AuthStatus;
   user: AuthenticatedUser | null;
   login: (credentials: LoginRequest) => Promise<void>;
@@ -43,7 +44,10 @@ interface AuthContextValue {
   refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+// eslint-disable-next-line react-refresh/only-export-components
+export const AuthContext = createContext<AuthContextValue | undefined>(
+  undefined,
+);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
@@ -74,7 +78,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // On boot, probe /auth/me with whatever token is in storage. Resolves
   // the `loading` state into either authenticated or unauthenticated.
+  // This is a legitimate effect-driven sync with two external systems
+  // (localStorage + the backend) — refreshUser's setStates land inside
+  // an async callback so the rule's "synchronous cascading renders"
+  // concern doesn't apply, but the linter can't see through the call.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshUser();
   }, [refreshUser]);
 
@@ -110,12 +119,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used inside <AuthProvider>");
-  }
-  return ctx;
 }

@@ -6,8 +6,7 @@
  * Vite strips anything else for safety so server-side secrets can't leak
  * into the client bundle by accident.
  */
-const REQUIRED_KEYS = ["VITE_API_URL"] as const;
-type RequiredKey = (typeof REQUIRED_KEYS)[number];
+type RequiredKey = "VITE_API_URL";
 
 function readRequired(key: RequiredKey): string {
   const value = import.meta.env[key];

@@ -250,8 +250,12 @@ commit message should make the dependency explicit.
 
 ## 6. CI strategy
 
-`.github/workflows/ci.yml` runs on push / PR to `main` when any of
-these paths change:
+CI is split per workspace via independent workflows, each path-filtered
+so unrelated changes don't burn runner minutes.
+
+### `ci.yml` — backend
+
+Runs on push / PR to `main` when any of:
 
 - `backend/**`
 - `docker-compose.yml`
@@ -264,20 +268,25 @@ Two parallel jobs:
 | `test` (pytest) | Python-level test suite over SQLite in-memory + mocked Redis. 151 tests today. | `backend/` |
 | `compose-smoke` (docker compose) | Builds real images, brings up Postgres + Redis + migrate + app, probes `/health` on a live container. | repo root (compose file is there) |
 
-Concurrency group: `ci-${ref}`, cancel-in-progress — newer commits
-on the same ref kill the older run.
+Concurrency group: `ci-${ref}`, cancel-in-progress.
 
-### Adding admin-panel CI
+### `admin-panel.yml` — admin panel
 
-When the admin-panel ships its first non-scaffold commit, drop in
-`.github/workflows/admin-panel.yml`:
+Runs on push / PR to `main` when any of:
 
-- Path filter: `admin-panel/** + .github/workflows/admin-panel.yml`
-- `defaults.run.working-directory: admin-panel`
-- Steps: setup-node@v4 (cache: `npm`, cache-dependency-path:
-  `admin-panel/package-lock.json`) → `npm ci` → `npm run lint` →
-  `npm run build`
-- Add a `test` step if a test runner gets added
+- `admin-panel/**`
+- `.github/workflows/admin-panel.yml`
+
+Single job `build`:
+
+| Step | Purpose |
+|---|---|
+| `npm ci` | Deterministic install (fails on lock-file drift) |
+| `npm run lint` | ESLint over the whole workspace |
+| `npm run build` | `tsc -b && vite build` — type-check + production bundle |
+| upload-artifact `admin-panel-dist` | 7-day retention so the bundle is downloadable from a failed PR for inspection |
+
+Concurrency group: `admin-panel-${ref}`, cancel-in-progress.
 
 ### Adding mobile-app CI
 

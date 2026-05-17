@@ -1,4 +1,4 @@
-import { useAuth } from "@/auth/AuthContext";
+import { useAuth } from "@/auth/useAuth";
 
 /**
  * Placeholder landing page after sign-in. Replace with real KPI cards +

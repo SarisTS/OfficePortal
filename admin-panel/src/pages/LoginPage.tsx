@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { getErrorMessage } from "@/api/client";
-import { useAuth } from "@/auth/AuthContext";
+import { useAuth } from "@/auth/useAuth";
 
 interface LocationState {
   from?: string;

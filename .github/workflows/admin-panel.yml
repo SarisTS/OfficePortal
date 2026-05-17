@@ -1,0 +1,68 @@
+name: admin-panel CI
+
+on:
+  push:
+    branches: [main]
+    # Trigger when admin-panel/ or this workflow itself changes.
+    # The backend CI lives in ci.yml with its own path filter.
+    paths:
+      - "admin-panel/**"
+      - ".github/workflows/admin-panel.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "admin-panel/**"
+      - ".github/workflows/admin-panel.yml"
+
+# Cancel any in-flight run for the same ref when a new commit lands.
+concurrency:
+  group: admin-panel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: lint + build
+    runs-on: ubuntu-latest
+
+    # All run-steps execute from admin-panel/ so the commands match
+    # what a contributor sees when working inside that workspace.
+    defaults:
+      run:
+        working-directory: admin-panel
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          # cache-dependency-path is resolved from the REPO ROOT, not
+          # from the job's working-directory, so it needs the prefix.
+          cache-dependency-path: admin-panel/package-lock.json
+
+      - name: Install dependencies
+        # `npm ci` is the deterministic install — it errors out if
+        # package-lock.json is out of sync rather than silently fixing
+        # it, which is what we want in CI.
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        # `npm run build` is `tsc -b && vite build` — type-check + the
+        # production bundle. Both have to pass for the job to succeed.
+        run: npm run build
+
+      - name: Upload build artefact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-panel-dist
+          # Path is resolved from the repo root, not from the job's
+          # working-directory.
+          path: admin-panel/dist
+          retention-days: 7

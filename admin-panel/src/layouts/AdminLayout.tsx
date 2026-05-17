@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
-import { useAuth } from "@/auth/AuthContext";
+import { useAuth } from "@/auth/useAuth";
 
 /**
  * Top-bar + left-rail shell for authenticated admin screens. Each

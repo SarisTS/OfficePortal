@@ -2,8 +2,18 @@ import { useEffect, useState } from "react";
 
 /**
  * Debounced text input. Local state mirrors keystrokes for snappy UX;
- * the parent's onChange fires after `delayMs` of inactivity. Reset
- * when `value` is changed externally (e.g. filter cleared).
+ * the parent's onChange fires after `delayMs` of inactivity.
+ *
+ * Prop-sync: when the parent passes a new `value` (e.g. filters
+ * cleared), React 19's conditional-setState-during-render pattern
+ * resyncs `internal` without a useEffect.
+ *
+ * Debounce: scheduled via setTimeout inside a useEffect. The
+ * setState happens asynchronously in the timer callback — outside
+ * the effect body — so it doesn't trip set-state-in-effect.
+ * `onChange` is included in deps; its identity stays stable during
+ * typing bursts because typing only mutates this component's local
+ * state, not the parent's.
  */
 export function SearchInput({
   value,
@@ -17,13 +27,13 @@ export function SearchInput({
   delayMs?: number;
 }) {
   const [internal, setInternal] = useState(value);
+  const [lastSeenValue, setLastSeenValue] = useState(value);
 
-  // External resets keep the input in sync.
-  useEffect(() => {
+  if (value !== lastSeenValue) {
+    setLastSeenValue(value);
     setInternal(value);
-  }, [value]);
+  }
 
-  // Debounce: only fire onChange after the user stops typing.
   useEffect(() => {
     if (internal === value) return;
     const handle = window.setTimeout(() => onChange(internal), delayMs);
