@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.permissions import is_super_admin, same_company
 from app.database.database import with_transaction
 from app.models.holiday import CompanyHoliday, CompanyWeeklyOff
+from app.services.audit import log_audit, snapshot
 
 
 def _assert_can_touch(actor, company_id: int) -> None:
@@ -58,6 +59,12 @@ def create_holiday(db: Session, data, actor) -> CompanyHoliday:
     )
     with with_transaction(db):
         db.add(holiday)
+        db.flush()
+        log_audit(
+            db, actor=actor, action="holiday.create",
+            entity_type="holiday", entity_id=holiday.id,
+            company_id=company_id, after=snapshot(holiday),
+        )
     db.refresh(holiday)
     return holiday
 
@@ -195,10 +202,18 @@ def update_holiday(
                 f"Another holiday already exists on {new_date.isoformat()}",
             )
 
+    before = snapshot(holiday)
     with with_transaction(db):
         for key, value in update_data.items():
             setattr(holiday, key, value)
         holiday.updated_by = actor.id
+        db.flush()
+        log_audit(
+            db, actor=actor, action="holiday.update",
+            entity_type="holiday", entity_id=holiday.id,
+            company_id=holiday.company_id,
+            before=before, after=snapshot(holiday),
+        )
     db.refresh(holiday)
     return holiday
 
@@ -207,10 +222,85 @@ def delete_holiday(
     db: Session, holiday_id: int, actor
 ) -> CompanyHoliday:
     holiday = get_holiday(db, holiday_id, actor)
+    before = snapshot(holiday)
     with with_transaction(db):
         holiday.deleted_at = datetime.now(timezone.utc)
         holiday.updated_by = actor.id
+        log_audit(
+            db, actor=actor, action="holiday.delete",
+            entity_type="holiday", entity_id=holiday.id,
+            company_id=holiday.company_id, before=before,
+        )
     return holiday
+
+
+def bulk_delete_holidays(
+    db: Session, company_id: int, actor,
+    ids: list[int] | None = None, year: int | None = None,
+) -> tuple[int, list[dict]]:
+    """Soft-delete many holidays in one call.
+
+    Two modes (the caller must pick one):
+      - ids:   delete the listed IDs (surgical)
+      - year:  delete every holiday in `company_id` for that calendar year
+               (typical use: clear a wrong import to re-upload)
+
+    Continues on per-row failures (cross-tenant ID, already-deleted) and
+    captures them in `skipped`. Each successful delete writes a
+    holiday.delete audit row.
+
+    Returns (deleted_count, skipped). company_id is already scope-
+    resolved by the caller.
+    """
+    if (ids is None) == (year is None):
+        raise HTTPException(
+            400,
+            "Provide exactly one of `ids` or `year`",
+        )
+
+    if ids is not None:
+        candidates = (
+            db.query(CompanyHoliday)
+            .filter(
+                CompanyHoliday.id.in_(ids),
+                CompanyHoliday.deleted_at.is_(None),
+            )
+            .all()
+        )
+    else:
+        candidates = (
+            db.query(CompanyHoliday)
+            .filter(
+                CompanyHoliday.company_id == company_id,
+                CompanyHoliday.deleted_at.is_(None),
+                CompanyHoliday.date >= date(year, 1, 1),
+                CompanyHoliday.date <= date(year, 12, 31),
+            )
+            .all()
+        )
+
+    deleted = 0
+    skipped: list[dict] = []
+    now = datetime.now(timezone.utc)
+
+    for h in candidates:
+        # Defense in depth — caller already scoped, but if `ids` smuggled
+        # in another company's holiday, refuse it per-row.
+        if h.company_id != company_id:
+            skipped.append({"id": h.id, "reason": "Wrong company"})
+            continue
+        before = snapshot(h)
+        h.deleted_at = now
+        h.updated_by = actor.id
+        log_audit(
+            db, actor=actor, action="holiday.delete",
+            entity_type="holiday", entity_id=h.id,
+            company_id=h.company_id, before=before,
+        )
+        deleted += 1
+
+    db.commit()
+    return deleted, skipped
 
 
 # ---------------------------------------------------------------------------

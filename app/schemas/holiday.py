@@ -69,6 +69,25 @@ class CompanyHolidayBulkResult(BaseModel):
     skipped: list[dict]  # [{"date": "...", "reason": "..."}]
 
 
+class CompanyHolidayBulkDelete(StrictRequestModel):
+    """Body shape for DELETE /company-holidays/bulk.
+
+    Two modes (mutually exclusive — caller picks one):
+      - `ids`: delete the listed holiday IDs (precise surgical removal)
+      - `year`: delete every holiday in the company for that calendar year
+                (typical use: clear a wrong year's import to re-upload)
+    """
+    company_id: int
+    ids: Optional[list[int]] = None
+    year: Optional[int] = None
+
+
+class CompanyHolidayBulkDeleteResult(BaseModel):
+    """Response shape for DELETE /company-holidays/bulk."""
+    deleted: int
+    skipped: list[dict]  # [{"id": int, "reason": str}]
+
+
 # ---------- Weekly Off ----------
 
 class CompanyWeeklyOffCreate(StrictRequestModel):

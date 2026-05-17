@@ -21,7 +21,7 @@ def create_company(
     return {
         "status": status.HTTP_200_OK,
         "message": "Company created successfully",
-        "data": crud.create_company(db, company, user.id)
+        "data": crud.create_company(db, company, user)
     }
 
 
@@ -68,7 +68,7 @@ def update_company(
     db: Session = Depends(get_db),
     user = Depends(require_super_admin)
 ):
-    updated = crud.update_company(db, company_id, company, user.id)
+    updated = crud.update_company(db, company_id, company, user)
 
     if not updated:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -86,7 +86,7 @@ def delete_company(
     db: Session = Depends(get_db),
     user = Depends(require_super_admin)
 ):
-    deleted = crud.delete_company(db, company_id, user.id)
+    deleted = crud.delete_company(db, company_id, user)
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Company not found")

@@ -53,6 +53,42 @@ def list_logs(
 
 
 @router.get(
+    "/entities/{entity_type}/{entity_id}",
+    response_model=ApiResponse[AuditLogListResponse],
+)
+def list_logs_for_entity(
+    entity_type: str,
+    entity_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user=Depends(require_admin),
+):
+    """Convenience URL: every audit row for a single entity, newest first.
+
+    Equivalent to GET /audit-logs/?entity_type=X&entity_id=Y — the
+    dedicated path is cleaner for an admin UI's "history" tab.
+    Tenant scoping (super_admin sees all, office_admin sees only their
+    company) is enforced inside the CRUD layer.
+    """
+    total, items = crud.list_audit_logs(
+        db, user,
+        entity_type=entity_type, entity_id=entity_id,
+        skip=skip, limit=limit,
+    )
+    return {
+        "status": status.HTTP_200_OK,
+        "message": "Audit logs fetched",
+        "data": {
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "items": items,
+        },
+    }
+
+
+@router.get(
     "/{log_id}", response_model=ApiResponse[AuditLogResponse]
 )
 def get_log(

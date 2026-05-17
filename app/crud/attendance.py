@@ -9,6 +9,7 @@ from app.models.assignment import EmployeeShiftAssignment
 from app.models.employee import Employee, UserTypes
 from app.schemas.attendance import AttendanceUpdate
 from app.crud.auth import is_global_admin
+from app.services.audit import log_audit, snapshot
 
 
 def _active_shift_id_for(db: Session, employee_id: int, on_date) -> int | None:
@@ -114,9 +115,18 @@ def update_attendance(db: Session, attendance_id: int, data: AttendanceUpdate, u
         if field in update_data:
             raise HTTPException(400, f"{field} cannot be updated")
 
+    before = snapshot(attendance)
+
     for key, value in update_data.items():
         setattr(attendance, key, value)
 
+    db.flush()
+    log_audit(
+        db, actor=user, action="attendance.update",
+        entity_type="attendance", entity_id=attendance.id,
+        company_id=attendance.company_id,
+        before=before, after=snapshot(attendance),
+    )
     db.commit()
     db.refresh(attendance)
 
@@ -142,8 +152,14 @@ def delete_attendance(db: Session, attendance_id: int, user):
         if attendance.employee.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
 
+    before = snapshot(attendance)
     attendance.deleted_at = datetime.now(timezone.utc)
 
+    log_audit(
+        db, actor=user, action="attendance.delete",
+        entity_type="attendance", entity_id=attendance.id,
+        company_id=attendance.company_id, before=before,
+    )
     db.commit()
 
     return attendance

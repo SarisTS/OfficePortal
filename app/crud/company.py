@@ -3,10 +3,11 @@ from fastapi import HTTPException
 from app.models.company import Company
 from app.models.employee import UserTypes
 from app.core.logger import get_logger
+from app.services.audit import log_audit, snapshot
 
 logger = get_logger()
 
-def create_company(db: Session, company_data, user_id: int):
+def create_company(db: Session, company_data, actor):
     try:
         # 🔍 Duplicate check
         existing = db.query(Company).filter(
@@ -28,9 +29,15 @@ def create_company(db: Session, company_data, user_id: int):
                 raise HTTPException(status_code=400, detail="Invalid parent company")
 
         company = Company(**company_data.model_dump())
-        company.created_by = user_id
+        company.created_by = actor.id
 
         db.add(company)
+        db.flush()  # populate id for the audit snapshot
+        log_audit(
+            db, actor=actor, action="company.create",
+            entity_type="company", entity_id=company.id,
+            company_id=company.id, after=snapshot(company),
+        )
         db.commit()
         db.refresh(company)
 
@@ -84,7 +91,7 @@ def get_company(db: Session, company_id: int, actor):
     ).first()
 
 
-def update_company(db: Session, company_id: int, data, user_id: int):
+def update_company(db: Session, company_id: int, data, actor):
     try:
         company = db.query(Company).filter(
             Company.id == company_id,
@@ -110,11 +117,20 @@ def update_company(db: Session, company_id: int, data, user_id: int):
             if data.parent_company_id == company_id:
                 raise HTTPException(status_code=400, detail="Cannot set itself as parent")
 
+        before = snapshot(company)
+
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(company, key, value)
 
-        company.updated_by = user_id
+        company.updated_by = actor.id
 
+        db.flush()
+        log_audit(
+            db, actor=actor, action="company.update",
+            entity_type="company", entity_id=company.id,
+            company_id=company.id,
+            before=before, after=snapshot(company),
+        )
         db.commit()
         db.refresh(company)
 
@@ -128,7 +144,7 @@ def update_company(db: Session, company_id: int, data, user_id: int):
         raise
 
 
-def delete_company(db: Session, company_id: int, user_id: int):
+def delete_company(db: Session, company_id: int, actor):
     try:
         company = db.query(Company).filter(
             Company.id == company_id,
@@ -138,9 +154,16 @@ def delete_company(db: Session, company_id: int, user_id: int):
         if not company:
             return None
 
-        company.is_active = False
-        company.updated_by = user_id
+        before = snapshot(company)
 
+        company.is_active = False
+        company.updated_by = actor.id
+
+        log_audit(
+            db, actor=actor, action="company.delete",
+            entity_type="company", entity_id=company.id,
+            company_id=company.id, before=before,
+        )
         db.commit()
 
         logger.info(f"Company soft deleted: {company_id}")

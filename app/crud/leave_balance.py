@@ -18,6 +18,7 @@ from app.core.permissions import (
 from app.database.database import with_transaction
 from app.models.employee import Employee
 from app.models.leave import LeaveBalance, LeaveType
+from app.services.audit import log_audit, snapshot
 from app.services.leave_balance import get_or_init_balance
 
 
@@ -104,13 +105,27 @@ def adjust_balance(
             f"already-used ({balance.used:.1f}). Refund leaves first.",
         )
 
+    before = snapshot(balance)
+    # Attach the reason + delta to the audit row's `after` payload so an
+    # auditor can read the "why" without needing a separate adjustments
+    # table. (If compliance ever asks for a dedicated table later, the
+    # data is still reconstructible from the audit log.)
     with with_transaction(db):
         balance.allocated = new_allocated
         balance.updated_by = actor.id
-        # The reason isn't stored in a dedicated column today; it's
-        # captured via the request log + this commit's updated_at.
-        # Adding a leave_balance_adjustments audit table is a small
-        # follow-up if compliance ever asks.
+        db.flush()
+        after = snapshot(balance)
+        if after is not None:
+            after["_adjustment"] = {
+                "delta": data.delta,
+                "reason": data.reason,
+            }
+        log_audit(
+            db, actor=actor, action="leave_balance.adjust",
+            entity_type="leave_balance", entity_id=balance.id,
+            company_id=target.company_id,
+            before=before, after=after,
+        )
 
     db.refresh(balance)
     return balance
