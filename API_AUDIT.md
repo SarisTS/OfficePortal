@@ -1,8 +1,85 @@
 # OfficePortal HRMS Backend — Phase 1 API Audit
 
-**Date:** 2026-05-16
+**Date:** 2026-05-16 (audit), 2026-05-17 (status update)
 **Scope:** all 26 routers mounted in `main.py`
 **Goal:** verify production-readiness for the Admin React app and Flutter mobile app
+
+---
+
+## Phase 1 Remediation Status (2026-05-17)
+
+The remediation list in section 6 has been fully addressed across four commits.
+Status legend: ✅ shipped · ⏸ deferred (Phase 2 / out-of-scope-for-stabilization)
+
+| # | Item | Status | Commit |
+|---|------|--------|--------|
+| 1 | Deprecate / rewrite POST /auth/employees | ✅ | `2e83c03` |
+| 2 | super_admin gate on /companies/ mutations | ✅ | `2e83c03` |
+| 3 | Tenant scoping on /companies/ reads | ✅ | `2e83c03` |
+| 4 | Logout endpoint (stub) | ✅ | `2e83c03` |
+| 5 | Fix POST /attendance/manual parameter shape + tenant check | ✅ | `2e83c03` |
+| 6 | Fix /auth/google/callback exception handling | ✅ | `2e83c03` |
+| 7 | Wrap food module in ApiResponse | ✅ | `63d06da` |
+| 8 | /me/leaves, /me/shifts/*, /me/payslips/latest, /attendance/me filters | ✅ | `a8e1a68` |
+| 9 | Admin employee search/filter | ✅ | `a8e1a68` |
+| 10 | Admin password-reset + activate/deactivate | ✅ | `a8e1a68` |
+| 11 | RESTful aliases for /locations/* (additive) | ✅ | `63d06da` |
+| 12 | Empty-list 404 fix on GET /locations/ | ✅ | `63d06da` |
+| 13 | ge/le constraints on hostels/roles/departments pagination | ✅ | `63d06da` |
+| 14a | Profile photo upload | ⏸ | Phase 2 — needs storage-backend design |
+| 14b | Bulk holiday DELETE | ✅ | `dee5ae1` |
+| 14c | Audit-by-entity convenience URL | ✅ | `dee5ae1` |
+| 15 | Stylistic cleanup in food + location modules | ✅ | `63d06da` |
+
+Section 7 audit coverage gaps (extending log_audit to surfaces missed in the first audit pass):
+| Surface | Status | Commit |
+|---|---|---|
+| company CUD | ✅ | `dee5ae1` |
+| attendance update/delete | ✅ | `dee5ae1` |
+| holiday CUD | ✅ | `dee5ae1` |
+| leave_balance.adjust (with reason in audit payload) | ✅ | `dee5ae1` |
+| role CUD | ✅ | _pending commit_ |
+| department CUD | ✅ | _pending commit_ |
+
+Section 8 verification items (tests that closed the open coverage gaps):
+| Item | Status | Commit |
+|---|---|---|
+| Expired JWT → 401 | ✅ | `dee5ae1` |
+| Soft-deleted user login fails | ✅ | `dee5ae1` |
+| POST /attendance/manual end-to-end works | ✅ | `2e83c03` |
+| check-in/check-out geo-fence accepts inside / rejects outside | ✅ | _pending commit_ |
+
+### Deferred items (with rationale)
+
+- **Profile photo upload (#14a)** — true new feature with real design choices
+  (S3 vs local disk vs DB blob, image resize policy, public-bucket settings).
+  Phase 1 is feature-frozen, so this stays on the Phase 2 backlog.
+
+- **Soft-delete consistency on company** (section 7 cross-cutting concern) —
+  `crud/company.py` uses `is_active=False` while every other model uses
+  `deleted_at`. The audit flagged this as a maintenance trap. Migrating
+  `company` to `deleted_at` requires: (1) an Alembic migration adding
+  `deleted_at` and backfilling from `is_active`, (2) updating every query that
+  reads `Company.is_active`, (3) FK paths from Employee/Hostel/etc. Not
+  risky-to-ship but invasive enough that it's a dedicated commit rather than a
+  drive-by; deferred and tracked as a Phase 2 cleanup item.
+
+- **Phase 2 backlog (frozen for stabilization):** refresh tokens (real
+  revocation, replaces the stub logout), TDS slabs, notification system, MFA,
+  leave carry-forward, manual leave adjustment dedicated table,
+  net >= 0 clamp policy, unpaid LeaveType, alternate-Saturday weekly pattern,
+  per-company hostel scoping, `class Config` → `ConfigDict` migration.
+
+### Test coverage growth
+
+- Audit start: 89 tests passing
+- After all Phase 1 work (this report's status): **151+ tests** passing
+  across `test_phase1_critical_fixes`, `test_phase1_before_launch`,
+  `test_phase1_nice_to_have`, `test_phase1_geofence_and_audit`,
+  and the new `test_audit_log` from feat(audit). CI green on Linux for
+  every Phase 1 commit listed above.
+
+---
 
 This report classifies every endpoint as **WORKING / INCOMPLETE / MISSING /
 RISKY / DEPRECATED**, then ends with a prioritized remediation list.

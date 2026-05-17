@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from app.models.department import Department
 from app.core.logger import get_logger
 from app.crud.auth import is_global_admin
+from app.services.audit import log_audit, snapshot
 
 logger = get_logger()
 
@@ -24,6 +25,13 @@ def create_department(db, department, user):
         db_department.created_by = user.id
 
         db.add(db_department)
+        db.flush()
+        log_audit(
+            db, actor=user, action="department.create",
+            entity_type="department", entity_id=db_department.id,
+            company_id=db_department.company_id,
+            after=snapshot(db_department),
+        )
         db.commit()
         db.refresh(db_department)
 
@@ -91,11 +99,20 @@ def update_department(db, department_id, data, user):
             if existing:
                 raise HTTPException(400, "Department already exists")
 
+        before = snapshot(dept)
+
         for key, value in update_data.items():
             setattr(dept, key, value)
 
         dept.updated_by = user.id
 
+        db.flush()
+        log_audit(
+            db, actor=user, action="department.update",
+            entity_type="department", entity_id=dept.id,
+            company_id=dept.company_id,
+            before=before, after=snapshot(dept),
+        )
         db.commit()
         db.refresh(dept)
 
@@ -120,9 +137,15 @@ def delete_department(db, department_id, user):
         if not is_global_admin(user) and dept.company_id != user.company_id:
             raise HTTPException(403, "Not allowed")
 
+        before = snapshot(dept)
         dept.deleted_at = datetime.now(timezone.utc)
         dept.updated_by = user.id
 
+        log_audit(
+            db, actor=user, action="department.delete",
+            entity_type="department", entity_id=dept.id,
+            company_id=dept.company_id, before=before,
+        )
         db.commit()
 
         return dept

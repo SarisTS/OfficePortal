@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from app.models.role import Role
 from app.core.logger import get_logger
+from app.services.audit import log_audit, snapshot
 
 logger = get_logger()
 
@@ -23,6 +24,14 @@ def create_role(db, role, user):
         db_role.created_by = user.id
 
         db.add(db_role)
+        db.flush()
+        # Roles are global (no company_id), so company_id stays None
+        # on the audit row.
+        log_audit(
+            db, actor=user, action="role.create",
+            entity_type="role", entity_id=db_role.id,
+            after=snapshot(db_role),
+        )
         db.commit()
         db.refresh(db_role)
 
@@ -75,11 +84,19 @@ def update_role(db, role_id, data, user):
             if existing:
                 raise HTTPException(400, "Role already exists")
 
+        before = snapshot(role)
+
         for key, value in update_data.items():
             setattr(role, key, value)
 
         role.updated_by = user.id
 
+        db.flush()
+        log_audit(
+            db, actor=user, action="role.update",
+            entity_type="role", entity_id=role.id,
+            before=before, after=snapshot(role),
+        )
         db.commit()
         db.refresh(role)
 
@@ -105,9 +122,14 @@ def delete_role(db, role_id, user):
         if role.role_name in SYSTEM_ROLES:
             raise HTTPException(400, "Cannot delete system roles")
 
+        before = snapshot(role)
         role.deleted_at = datetime.now(timezone.utc)
         role.updated_by = user.id
 
+        log_audit(
+            db, actor=user, action="role.delete",
+            entity_type="role", entity_id=role.id, before=before,
+        )
         db.commit()
 
         return role
